@@ -1,0 +1,3540 @@
+#INCLUDE 'PROTHEUS.CH'
+#INCLUDE "TBICONN.CH"
+#INCLUDE "TOPCONN.CH"
+
+#DEFINE USEERRORBLOCK	.F.
+#DEFINE RDDTEST_TABLE 	"RDDTEST"
+#DEFINE	MAX_FILCPOS		180
+#DEFINE TEST_EXTERNAL	.F.	// BUILD PARA TESTE EXTERNO
+#DEFINE MAXSIZE_SPEXEC	100	// tamanho maximo de caracteres para stored procedure
+#DEFINE SIZE_CHARFIELD	10	// Tamanho do campo caractere padrao da tabela de teste
+#DEFINE FORCE_MONITOR_KBUM	.F.
+#DEFINE CHAR_OVERFLOW		0
+#DEFINE TOP_MALLOC			.F. // Arrebenta o top alocando memoria 
+#DEFINE TOP_USELASTREC		.T.
+
+// Tamanho dos campos Memo para teste
+#DEFINE MEMO_MINSIZE		0
+#DEFINE MEMO_MAXSIZE		256000
+
+// Definicoes de teste
+#DEFINE SKIP_400			.F.
+#DEFINE SHOW_RLOCK_FAILED	.F.
+#DEFINE TEST_APPEND			.T.
+#DEFINE TEST_REPLACE		.T.
+#DEFINE TEST_GOTOP			.T.
+#DEFINE TEST_DBSEEK			.T.	// OPA ! Se desligar , nao reproduz mais ...
+#DEFINE TEST_SOFTSEEK		.T. // desligado e ainda reproduz
+#DEFINE TEST_GOTOREC		.T.
+#DEFINE TEST_DBSKIP	 		.T.
+#DEFINE TEST_DBCOMMIT		.T.
+#DEFINE TEST_VERIFYENV		.T.
+#DEFINE TEST_DBGOBOTTOM 	.F.
+#DEFINE TEST_SETTRIGGER		.F.
+#DEFINE REPLACE_ALLFIELDS	(Randomize(1,3)==2)
+#DEFINE TEST_TCSQLEXEC		.T.
+#DEFINE DELETE_TOPFIELD		.F.
+#DEFINE TEST_UNIQUEINDEX	.F.
+#DEFINE TEST_TCSETPARAM 	.F.
+#DEFINE TEST_TCINTERNAL 	.F.	// desligado, continua reproduzindo 
+#DEFINE SQLFILTER_TYPE 		2	// 0 = Random ! / 1 Sql Only / 2 isam nativo only
+#DEFINE TEST_QUERYES		.F.
+#DEFINE USE_EXTRA_ALIAS		.T.	// desligado e ainda reproduz.... 
+#DEFINE USE_INDEX1			.T.
+#DEFINE USE_INDEX2			.T.
+#DEFINE USE_INDEX3			.T.
+#DEFINE TEST_CLEARFILTER	.T.
+
+// Top Connect - Virtual Lock
+#DEFINE TEST_TCVLOCK		.T.
+#DEFINE VLOCK_ECHO			.F.
+#DEFINE VLOCK_MAXLIST		100
+#DEFINE VLOCK_MINLIST		10
+
+#DEFINE TEST_RUNLOCK		.T. // desligado e continua reproduzindo
+#DEFINE EAT_CREATE 			.F.
+#DEFINE EAT_MAXFILES 		500
+#DEFINE MAX_RECNOSTEST		1000
+
+#DEFINE VM_INSERT     64   // Inclusao de Registro
+#DEFINE VM_UPDATE     128  // Alteracao de Registro
+#DEFINE VM_DELETE     256  // Exclusao de Registro
+
+STATIC __USEVLOCK 	:= NIL
+STATIC __LISTVLOCK  := {}
+
+STATIC aMEMTables 	:= {}
+STATIC _CurrAPos	:= 0
+STATIC _CurrAlias   := ''
+STATIC _CurrMaxCpos := 0
+STATIC _COLRecno    := 0
+STATIC _COLDeleted  := 0
+STATIC _CurrLastRec	:= 0
+STATIC _CurrStru	:= {}
+STATIC __AliasMode  := {}
+STATIC __TempFile	:= ''
+STATIC __TopDB
+STATIC __SetThread 	:= .F.
+
+// [1] ArqName [2] Alias [3] Stru [4] Data [5] Tam Struct [6] Lastrec
+// Definições CHUMBADAS para testes muito específicos
+
+#DEFINE CHECK_NOTIFICATION 	.F.
+#DEFINE MAX_TEST_OPERATION	0
+#DEFINE USE_RLOCK			.T.
+#DEFINE USE_DBCLOSEALL		.T.
+#DEFINE SWAPCTREE			.F.
+#DEFINE SWAPADS				.F.
+
+#DEFINE RDDPATH 	'\rddtest\'
+#DEFINE SPF_RDDTEST	'\rddtest\rddtest.spf'
+
+#DEFINE TEST_MAXOPER		59
+#DEFINE MAX_ARRAYCFG		33
+
+#DEFINE USE_RDDTEST			1
+#DEFINE SHOWOP_INFO			2
+#DEFINE SHOWOP_SAVE			3
+#DEFINE TEST_TRAN			4 
+#DEFINE TEST_CANROLLBACK	5
+#DEFINE MIN_OPERTRAN		6
+#DEFINE NOT_USED			7
+#DEFINE TEST_USETMP			8
+#DEFINE MAX_RETRY_RLOCK		9
+#DEFINE INSANE_LEVEL		10	
+#DEFINE EXCEPTION_BREAK		11
+//#DEFINE TOP_DATABASE		12
+//#DEFINE TOP_ALIAS			13
+//#DEFINE TOP_SERVER		14
+//#DEFINE TOP_CONTYPE 		15
+//#DEFINE TOP_PORT 			16
+#DEFINE REOPEN_ALIAS		17
+#DEFINE REOPEN_INDEX		18
+#DEFINE USE_MEMOFIELD		19
+#DEFINE USE_SUPERFILE		20
+#DEFINE USE_DBREINDEX		21
+#DEFINE TEST_USETRB			22
+#DEFINE OPER_SLEEP			23
+#DEFINE USE_BASICINDEX		24
+#DEFINE TEST_TOPMAPPER		25
+#DEFINE UPD_AND_UNLOCK		26
+#DEFINE MEMORY_ECHO      	27
+#DEFINE MEMORY_CHECK		28
+#DEFINE USE_EXTRAINDEX		29
+#DEFINE USE_SETFILTER		30
+#DEFINE USE_SETDELETE		31
+#DEFINE USE_PACK			32
+#DEFINE TEST_SPEXEC			33 
+
+STATIC __aConfig
+STATIC aLocks := {}
+
+STATIC __UseTable	:= 0
+STATIC __nHLOG		:= -1
+STATIC __lInTran	:= .F.
+
+// Numero de registros minimo na tabela temporária 
+// Par que um ZAP seja executado.
+#DEFINE MIN_ZAPRECS			200	
+
+/* ==============================================================
+			Funcao de Execução de Stress via Remote
+   ============================================================== */
+
+//main function CTREEStress()
+//return XStress(2)
+
+//main function StressADSLoc()
+//return XStress(3)
+
+//main function StressAdsServer()
+//return XStress(4)
+
+//main function stressTOP()
+//return XStress(1)
+
+//main function CTREELStress()
+//return XStress(5)
+
+user function StressTest()
+return XStress(1)
+
+static function XStress( nRdd )
+local aConfig := {}, aShowInfo := {}, aSayThreads := {}
+local cShowInfo := ""
+local cThread := ""
+local oThreads, oTmr, oChkDummy
+	readCFG( nRdd )
+	aadd( aSayThreads, "(nenhuma)" )
+	aadd( aShowInfo, "1 - Console" )
+	aadd( aShowInfo, "2 - Comando" )
+	aadd( aShowInfo, "3 - Monitor" )
+	cShowInfo := aTail( aShowInfo )
+
+	ptSetAcento( .T. )
+
+	DEFINE DIALOG oDlg TITLE "Configurações" FROM 10, 10 TO 400, 700 COLOR CLR_BLACK, CLR_WHITE PIXEL
+	// __aConfig[USE_RDDTEST	  ] == 'CTREECDX'
+	@ 05, 005 CHECKBOX oChkDummy VAR __aConfig[SHOWOP_SAVE     ] PROMPT 'Salvar LOG' SIZE 80, 13 PIXEL OF oDlg
+	@ 05, 065 CHECKBOX oChkDummy VAR __aConfig[TEST_TRAN       ] PROMPT 'Testar transação' SIZE 80, 13 PIXEL OF oDlg
+
+	if!( TEST_EXTERNAL )
+		@ 05, 125 CHECKBOX oChkDummy VAR __aConfig[TEST_CANROLLBACK] PROMPT 'Habilitar RollBack' SIZE 80, 13 PIXEL OF oDlg
+	endIf
+
+	@ 05, 185 CHECKBOX oChkDummy VAR __aConfig[USE_DBREINDEX   ] PROMPT 'Usar DbReindex' SIZE 80, 13 PIXEL OF oDlg
+	@ 05, 245 CHECKBOX oChkDummy VAR __aConfig[USE_BASICINDEX	 ] PROMPT 'Index BASICO' SIZE 80, 13 PIXEL OF oDlg
+                                                              
+	if( __aConfig[USE_RDDTEST] != "TOPCONN" )
+		@ 05, 300 CHECKBOX oChkDummy VAR __aConfig[USE_EXTRAINDEX  ] PROMPT 'Index EXTRA' SIZE 80,13 PIXEL OF oDlg
+		@ 20, 005 CHECKBOX oChkDummy VAR __aConfig[TEST_USETMP	   ] PROMPT 'Usar arquivo TMP' SIZE 80,13 PIXEL OF oDlg
+	endIf
+
+	@ 20, 065 CHECKBOX oChkDummy VAR __aConfig[REOPEN_ALIAS	   ] PROMPT 'ReAbrir ALIASES' SIZE 80,13 PIXEL OF oDlg
+	@ 20, 125 CHECKBOX oChkDummy VAR __aConfig[REOPEN_INDEX	   ] PROMPT 'ReAbrir INDICES' SIZE 80,13 PIXEL OF oDlg
+	@ 20, 185 CHECKBOX oChkDummy VAR __aConfig[TEST_USETRB     ] PROMPT 'Usar arquivo TRB' SIZE 80,13 PIXEL OF oDlg
+	@ 20, 245 CHECKBOX oChkDummy VAR __aConfig[TEST_TOPMAPPER  ] PROMPT 'TOP MAPPER' SIZE 80,13 PIXEL OF oDlg
+	@ 20, 300 CHECKBOX oChkDummy VAR __aConfig[USE_SETFILTER   ] PROMPT 'SetFilter' SIZE 80,13 PIXEL OF oDlg
+	@ 35, 005 CHECKBOX oChkDummy VAR __aConfig[EXCEPTION_BREAK ] PROMPT 'Exception BREAK' SIZE 80,13 PIXEL OF oDlg
+	@ 35, 065 CHECKBOX oChkDummy VAR __aConfig[USE_MEMOFIELD   ] PROMPT 'Usar campo MEMO' SIZE 80,13 PIXEL OF oDlg
+
+	if( __aConfig[USE_RDDTEST] != "TOPCONN" )
+		@ 35, 125 CHECKBOX oChkDummy VAR __aConfig[USE_SUPERFILE   ] PROMPT 'Usa SUPERFILE' SIZE 80,13 PIXEL OF oDlg
+	endIf
+
+	@ 35, 185 GET      oGETSleep VAR __aConfig[OPER_SLEEP      ] PICTURE '9999' MESSAGE "Sleep entre operações" SIZE 25,10 PIXEL OF oDlg
+	@ 35, 245 CHECKBOX oChkDummy VAR __aConfig[UPD_AND_UNLOCK  ] PROMPT 'UPD & Unlock' SIZE 80,13 PIXEL OF oDlg
+	@ 35, 300 CHECKBOX oChkDummy VAR __aConfig[USE_PACK        ] PROMPT 'PACK' SIZE 80,13 PIXEL OF oDlg
+	@ 50, 005 COMBOBOX oShowInfo VAR cShowInfo ITEMS aShowInfo OF oDlg SIZE 050,50 VALID __aConfig[SHOWOP_INFO	  ] := val(left(cShowInfo,1)) MESSAGE 'Echo de Processamento' PIXEL
+
+	if( __aConfig[USE_RDDTEST] == "TOPCONN" )
+		@ 50, 065 CHECKBOX oChkDummy VAR __aConfig[TEST_SPEXEC     ] PROMPT 'Usar TCSPEXEC' SIZE 80,13 PIXEL OF oDlg
+	endif
+
+	if( __aConfig[USE_RDDTEST] = "CTREECDX" )
+		@ 50, 125 CHECKBOX oChkDummy VAR __aConfig[MEMORY_CHECK    ] PROMPT 'Memory CHECK' SIZE 80,13 PIXEL OF oDlg
+		@ 50, 185 CHECKBOX oChkDummy VAR __aConfig[MEMORY_ECHO     ] PROMPT 'Memory ECHO' SIZE 80,13 PIXEL OF oDlg
+	endif
+
+	@ 50,245 GET oGETInsane VAR __aConfig[INSANE_LEVEL] PICTURE '999' MESSAGE "Nivel de Insanidade" SIZE 25,10 PIXEL OF oDlg
+	@ 50,300 CHECKBOX oChkDummy VAR __Aconfig[USE_SETDELETE] PROMPT 'Set DELETED' SIZE 80,13 PIXEL OF oDlg
+
+	if( !TEST_EXTERNAL )
+		@ 65, 005 BUTTON oDummyBtn PROMPT 'EatFiles' ACTION (Startjob('U_EATFILES',getenvserver(),.F.,2,__aConfig),UpdateThreads(@oThreads,@aSayThreads)) SIZE 040, 013 OF oDlg PIXEL
+		@ 65, 065 BUTTON oDummyBtn PROMPT 'EatJobs' ACTION (Startjob('EATJOBS',getenvserver(),.F.,2,__aConfig),UpdateThreads(@oThreads,@aSayThreads)) SIZE 040, 013 OF oDlg PIXEL
+		@ 65, 125 BUTTON oDummyBtn PROMPT 'MMRead' ACTION MMRead() SIZE 040, 013 OF oDlg PIXEL
+		@ 65, 185 BUTTON oDummyBtn PROMPT 'EatSPF' ACTION (Startjob('EATSPF',getenvserver(),.F.,2,__aConfig),UpdateThreads(@oThreads,@aSayThreads)) SIZE 040, 013 OF oDlg PIXEL
+		@ 65, 245 BUTTON oDummyBtn PROMPT 'JVai' ACTION (U_JVai()) SIZE 040, 013 OF oDlg PIXEL
+	endif
+
+	@ 80,5 LISTBOX oThreads FIELDS HEADERS 'Threads em Execução' OF oDlg PIXEL SIZE 340,100
+
+	aSayThreads := { { "" } }
+	oThreads:setArray( aSayThreads )
+	oThreads:cargo := { || { aSayThreads[ oThreads:nAt ] } }
+	oThreads:bLine := oThreads:Cargo
+
+	__aConfig[MIN_OPERTRAN	 ] := 10
+	__aConfig[MAX_RETRY_RLOCK] := 3
+	__aConfig[INSANE_LEVEL	 ] := 0
+	__aConfig[OPER_SLEEP     ] := 0
+	__aConfig[REOPEN_ALIAS   ] := .F.
+	__aConfig[REOPEN_INDEX   ] := .F.
+	__aConfig[USE_SETFILTER  ] := .F.
+	__aConfig[USE_SETDELETE  ] := .F.
+	__aConfig[USE_PACK       ] := .F.
+	__aConfig[TEST_SPEXEC    ] := .F.
+	__aConfig[TEST_USETRB    ] := .T.
+	__aConfig[USE_BASICINDEX ] := .T.
+	__aConfig[EXCEPTION_BREAK] := .T.
+
+	@ 180, 005 BUTTON oCleanTst PROMPT 'Limpar Ambiente' ACTION CleanRddTest() SIZE 080, 013 OF oDlg PIXEL
+	@ 180, 090 BUTTON oExecTst PROMPT 'Adicionar Thread' ACTION (Startjob('U_RDDJTEST',getenvserver(),.F.,2,__aConfig),UpdateThreads(@oThreads,@aSayThreads)) SIZE 080, 013 OF oDlg PIXEL
+	@ 180, 175 BUTTON aStopTst PROMPT 'Abortar Threads' ACTION (BREAKXTEST(),UpdateThreads(@oThreads,@aSayThreads)) SIZE 080, 013 OF oDlg PIXEL
+	@ 180, 255 BUTTON aStopTst PROMPT 'Atualizar Threads' ACTION UpdateThreads(@oThreads,@aSayThreads) SIZE 080, 013 OF oDlg PIXEL
+
+	DEFINE TIMER oTmr OF oDlg INTERVAL 1000 ACTION UpdateThreads(@oThreads,@aSayThreads)
+	ACTIVATE TIMER oTmr
+	ACTIVATE DIALOG oDlg CENTER
+
+return
+
+// ======================================================================
+static function ReadCFG( nRdd )
+	__aConfig := array( MAX_ARRAYCFG )
+
+	// Alimenta valores DEFAULT
+	__aConfig[USE_BASICINDEX  ] := .F.
+	__aConfig[USE_EXTRAINDEX  ] := .F.
+	__aConfig[UPD_AND_UNLOCK  ] := .F.
+	__aConfig[SHOWOP_INFO     ] := 3
+	__aConfig[SHOWOP_SAVE     ] := .F.
+	__aConfig[TEST_TRAN       ] := .F.
+	__aConfig[TEST_CANROLLBACK] := .F.
+	__aConfig[MIN_OPERTRAN	  ] := 3000
+	__aConfig[TEST_USETMP	    ] := .F.
+	__aConfig[MAX_RETRY_RLOCK ] := 3
+	__aConfig[EXCEPTION_BREAK ] := .T.
+	__aConfig[USE_MEMOFIELD   ] := .F.
+	__aConfig[USE_SUPERFILE   ] := .F.
+	__aConfig[USE_DBREINDEX   ] := .F.
+	__aConfig[TEST_USETRB     ] := .F.
+	__aConfig[MEMORY_ECHO     ] := .F.
+	__aConfig[MEMORY_CHECK    ] := .F.
+
+	if( nRdd = 1 ) // TOP
+		__aConfig[USE_RDDTEST     ] := "TOPCONN"
+	elseIf nRdd = 2 // CTREE
+		__aConfig[USE_RDDTEST     ] := "CTREECDX"
+	elseIf nRdd = 3 // ADS LOCAL 
+		__aConfig[USE_RDDTEST     ] := "DBFCDXADS"
+	elseIf nRdd = 4 // ADS SERVER
+		__aConfig[USE_RDDTEST     ] := "DBFCDXAX"
+	elseIf nRdd = 5 // CTREE Local 
+		__aConfig[USE_RDDTEST     ] := "DBFCDX"
+	else
+		userException( "Unknow CFG [" + str( nRdd, 3 ) + "]" )
+	endif
+	
+return
+	
+/* =========================================================================
+   FUNCAO PARA FORÇAR PARADA DO TESTE
+   ========================================================================= */
+static function BREAKXTEST()
+	conOut( "[MANUAL BREAK RDD TEST]" )
+return putGlbValue( "RDDTEST_BREAK", "BREAK" )
+
+/* =========================================================================
+   FUNCAO PRINCIPAL DE TESTES DO RDD
+   ========================================================================= */
+User Function RDDJTEST( nRdd, aCfg )
+local cArq, aCampos
+local cCond := ""
+local cStatus	:= ""
+local cOwner := ""
+local nHdl, nOp, cFind, nH, nTry, nI, nSeq := 0
+local nTimeStart := 0
+local nLapsGo := 0
+local nInTran := 0
+local nInFile := 0
+local nCount := 0, nRet
+local aPutValues
+local aOp := {}
+local aConds := { "<", ">", "<=", ">=", "<>", "=" }
+local aUsedAlias := {}
+local lPreDef := .F.
+local lCServer := .F.
+local xSPRet
+local xSpValues
+local nX, nC
+if( USEERRORBLOCK )
+	errorBlock( { |e| RDDError( e ) } )
+endif
+
+if( aCfg <> nil )
+	// Se a configuração veio por parâmetro
+	__aConfig := aCfg
+else
+	ReadCFG( nRdd )
+endif
+
+conOut( str( threadId(), 10 ) + " [RDD_START] RDD " + __aConfig[ USE_RDDTEST ] )
+
+if( __aConfig[ SHOWOP_SAVE ] )
+	cLogFile := RDDPATH + 't_' + alltrim( str( ThreadId(), 8 ) ) + ".log"
+	__nHLOG := fcreate( cLogFile )
+	if( __nHLOG == -1 )
+		userException( "FCREATE (" + cLogFile + ") FERROR (" + str( ferror(), 4) + ")" )
+	endif
+
+endif
+
+if( __aConfig[ USE_RDDTEST ] = "TOPCONN" )
+	lCServer := .T. // RDD Suporta transação 
+	TSTTopInit()
+
+	// AQUI ! Permite ligar mapper para tabelas a partir de 1 campo
+	tcMaxMap( 1 )
+
+	if( "DB2" $ upper( tcGetDb() ) )
+		conOut( str( threadId(), 10 ) + " DB2 Application ID = " + getDBID() )
+	endif
+
+	if( tcIsvLock() )
+		conOut( str( threadId(), 10) + " Virtual Lock Engine OK" )
+	else
+		conOut( str( threadId(), 10) + " Virtual Lock Engine UNAVALIABLE" )
+	endif
+
+	if( FORCE_MONITOR_KBUM )
+		// Seta comentario da thread
+		// Coloca 1 K para cada thread. Se total info + comentarios passar de 64 K, 
+		// Top "VOA", pois invade area de stack !!!
+		tcInternal( 1, replicate( "*", 1023 ) )
+	endif
+elseIf( __aConfig[ USE_RDDTEST ] = "CTREECDX" )
+	// Verifica se CTREE está em modo SERVER
+	lCServer := upper( getPvProfString( "GENERAL", "CTREEMODE", "LOCAL", getAdv97() ) ) = "SERVER"
+elseIf( __aConfig[ USE_RDDTEST ] = "DBFCDXAX" )
+	lCServer := .T. // Rdd Suporta transação 
+endif
+
+showOp( , "// INIT " )
+
+if( __aConfig[ TEST_USETMP ] )
+	// Cria e abre tabela temporária
+	cArq := newTable()
+	aCampos := getKStruct( .T. )
+	TEMPCreate( cArq, aCampos )
+	TEMPOpen()
+	TEMPNewIndex()
+	TEMPSetIndex()
+	aadd( aUsedAlias, alias() )
+endif
+
+if(	__aConfig[ TEST_USETRB ] )
+	TRABOpen()
+	TRABSetIndex()
+	aadd( aUsedAlias, alias() )
+	if( __aConfig[USE_RDDTEST] = 'TOPCONN' .and. __aConfig[TEST_TOPMAPPER ] )
+		tcSrvMap( alias(), allTrim( fieldName( 1 ) ) )
+	endif
+endif
+
+// Extra TRB 
+if( USE_EXTRA_ALIAS )
+	TRABOpen( "TRX" )
+	TRABSetIndex()
+	aadd( aUsedAlias, alias() )
+endif
+
+aOp := LoadSequence()
+
+showOp( "START [" + alias() + "]" )
+
+nTimeStart := seconds()
+nLapsGo := 0
+
+// Inicia sempre no alias TRB
+showOP( "OP 22 - [" + _currAlias + "] Verify ENV" )
+cInfo := "(" + alias() + ") I " + strZero( ( nIdxOrd := indexord() ), 1 )
+cInfo += " R " + strzero( recno(), 6 )
+cInfo += " " + iif( bof(), "BOF", "" )
+cInfo += " " + iif( eof(), "EOF", "" )
+cInfo += " " + iif( deleted(), "DEL", "" )
+cInfo += " T " + strZero( ( nLast := lastrec() ), 6 )
+showOP( cInfo )
+
+While !RDDBreak()
+
+	// A cada volta, verifica o alias ... 
+	MEMChkAlias()
+	
+/*
+	// AS400 : Ainda tem pendenga com filtros e recno 0 (zero) 
+	if !empty(alias()) .and. recno()==0
+		UserException("MERDA")
+	Endif
+*/
+
+	// Troca de RDD entre local e transacionado
+	if SWAPCTREE
+		__aConfig[USE_RDDTEST	  ]	:= iif( randomize( 1, 3 ) = 2, "DBFCDX", "CTREECDX" )
+	elseIf SWAPADS
+		__aConfig[USE_RDDTEST	  ]	:= iif( randomize( 1, 3 ) = 2, "DBFCDX", "DBFCDXAX" )
+	endif
+
+	nCount++
+
+	IF MAX_TEST_OPERATION > 0 .and. nCount > MAX_TEST_OPERATION
+		EXIT
+	Endif
+
+	If CHECK_NOTIFICATION .and. !bof() .and. !eof() .and. isTrbAlias() .and. nCount%10=0
+
+		nRet := CTMemFileDiff('TRB',RDDPATH+'rddtest.dtc')
+		If nRet = 0 
+			UserException('CTMemFileDiff Error ['+str(nRet)+']')
+		Endif	
+	Endif
+	
+	if __aConfig[OPER_SLEEP]>10
+		sleep(__aConfig[OPER_SLEEP])
+	Endif
+
+	If len(aOp)>0
+		// Sequencia pré-definida de operações
+		// lPreDef := .T.
+		nOp := aOp[1]
+		adel(aOp,1)
+		asize(aOp,len(aOp)-1)
+	Else
+		// Operações aleatórias
+		nOp := randomize(1,TEST_MAXOPER)
+	Endif
+
+	// Teste babinha ...AS400
+	// tcrefresh(RDDTEST_TABLE)
+	nLapsGo++
+
+	IF __aConfig[USE_RDDTEST] = 'TOPCONN' .and. !__SetThread
+		TcInternal(1,"STRESS "+str(threadid(),10)+" OP "+str(nOp,3)+" SEQ "+str(nCount,6))
+		__SetThread := .t.
+	Endif
+
+	if( nOp = 1 .and. TEST_APPEND .and. lastrec() < MAX_RECNOSTEST )
+		if( __aConfig[ UPD_AND_UNLOCK ] )
+			showOP( "OP 01 - [" + _currAlias + "] dbAppend ( UPDATE & UNLOCK )", "dbAppend( .F. )" )
+		else
+			showOP( "OP 01 - [" + _currAlias + "] dbAppend", "dbAppend( .F. )")
+		endif
+
+		// Verificar : Deve suportar operação "sem desligar mapa" ?
+		If __aConfig[USE_RDDTEST] = 'TOPCONN' .and. __aConfig[TEST_TOPMAPPER ]
+			TCSRVMAP(alias(),,.F.)
+		Endif
+
+		// Append , sem soltar locks anteriores
+		dbappend(.F.)
+		nRecMEM := MEMAppend()
+
+		If NetErr()
+			UserException('Falha no DbAppend(.F.)')
+		Endif
+		
+		aPutValues := {}
+		For nC := 1 to _CurrMaxCpos
+			If randomize(1,3)==2 .or. REPLACE_ALLFIELDS
+				xVal 	:= xValue(_CurrStru[nC][2],_CurrStru[nC][3],_CurrStru[nC][4])
+				FieldPut(nC,xVal)
+				aadd(aPutValues,{nC,xVal})
+			Endif
+		Next
+
+		IF __aConfig[USE_MEMOFIELD]
+			xVal 	:= xValue("M",10,0)
+			FieldPut(fieldpos("CPOM"),xVal)
+			aadd(aPutValues,{fieldpos("CPOM"),xVal})
+		Endif
+			
+		MEMPutValues(alias(),nRecMEM,aPutValues)
+	
+		// Temporario 
+		// DbCommit()
+
+		IF __aConfig[UPD_AND_UNLOCK] .and. !__lInTran
+			dbrunlock(recno())
+			dbskip()
+		Else
+ 			AddRLock(recno())
+		Endif
+
+	ElseIf nOp = 2 .and. __aConfig[USE_BASICINDEX	 ]  .and. USE_INDEX1
+
+		ShowOP('OP 02 - ['+_CurrAlias+'] dbsetorder(1)','dbsetorder(1)')
+		dbsetorder(1)
+
+	ElseIf nOp = 3 .and. __aConfig[USE_BASICINDEX	 ] .and. USE_INDEX2
+
+		ShowOP('OP 03 - ['+_CurrAlias+'] dbsetorder(2)','dbsetorder(2)')
+		dbsetorder(2)
+
+	ElseIf nOp = 4 .and. IsAliasExcl() .and. !__lInTran .and. __aConfig[USE_PACK]
+
+		IF !__aConfig[TEST_TOPMAPPER ]
+			// Só executa se nao estiver testando MAPPER
+
+			If randomize(1,20)=2
+				ShowOP('OP 04 - ['+_CurrAlias+'] PACK ( A = '+Alias()+;
+							' T = '+str(lastrec(),6),;
+							'__dbPack()')
+				PACK
+				MEMPack()
+			Endif
+	
+		Endif
+		
+	ElseIf nOp = 5 .and. TEST_GOTOP
+
+		ShowOP('OP 05 - ['+_CurrAlias+'] dbgotop()','dbgotop()')
+		dbgotop()
+
+	ElseIf nOp = 6 .and. TEST_DBGOBOTTOM
+
+		ShowOP('OP 06 - ['+_CurrAlias+'] DbGoBottom()','DbGoBottom()')
+		DbGoBottom()
+
+	ElseIf nOp = 7 .and. TEST_DBSEEK
+
+		If indexord() = 3
+			dFind := xValue('D')
+			ShowOP('OP 07 - ['+_CurrAlias+'] DbSeek D ['+dtos(dFind)+']  ',;
+					'DbSeek(stod("'+dtos(dFind)+'"),.F.)')
+			DbSeek(dFind,.F.)
+		ElseIf indexord() = 2
+			nFind := xValue('N',1,0)
+			ShowOP('OP 07 - ['+_CurrAlias+'] DbSeek N ['+str(nFind,8,2)+']  ',;
+					'DbSeek('+str(nFind,8,2)+',.F.)')
+			DbSeek(nFind,.F.)
+		ElseIf indexord() = 1
+			cFind := xValue('C',randomize(1,1024))
+			ShowOP('OP 07 - ['+_CurrAlias+'] DbSeek C ['+cFind+']  ',;
+					'DbSeek("'+cFind+'",.F.)')
+			DbSeek(cFind,.F.)
+		Endif
+		
+		if SKIP_400 .and. !eof()
+			nR1 := recno()
+			dbskip()
+			nr2 := recno()
+			If nR1 == nR2 
+				UserException("Skip falhou apos seek !!!")
+			Else
+				Conout(padc(" SEEK SKIP OK ",79,"*"))
+			Endif
+		Endif
+
+	ElseIf nOp = 8 .and. TEST_SOFTSEEK
+
+		If indexord() = 3
+			dFind := xValue('D')
+			ShowOP('OP 08 - ['+_CurrAlias+'] DbSeek D ['+dtos(dFind)+'] [SOFT] ',;
+					'DbSeek(stod("'+dtos(dFind)+'"),.t.)')
+			DbSeek(dFind,.T.)
+		ElseIf indexord() = 2
+			nFind := xValue('N',1,0)
+			ShowOP('OP 08 - ['+_CurrAlias+'] DbSeek N ['+str(nFind,8,2)+'] [SOFT] ',;
+					'DbSeek('+str(nFind,8,2)+',.t.)')
+			DbSeek(nFind,.t.)
+		ElseIf indexord() = 1 
+			cFind := xValue('C',randomize(1,5))
+			ShowOP('OP 08 - ['+_CurrAlias+'] DbSeek C ['+cFind+'] [SOFT]',;
+					'DbSeek("'+cFind+'",.t.)')
+			DbSeek(cFind,.t.)
+		Endif
+
+		if SKIP_400 .and. !eof()
+			nR1 := recno()
+			dbskip()
+			nr2 := recno()
+			If nR1 == nR2 
+				UserException("Skip falhou apos seek !!!")
+			Else
+				Conout(padc(" SEEK SKIP OK ",79,"*"))
+			Endif
+		Endif
+
+	ElseIf nOp = 9 .and. TEST_GOTOREC .and. lastrec()>0
+
+		nGo := randomize(1,lastrec()+1)
+		ShowOP('OP 09 - ['+_CurrAlias+'] DbGoto ['+str(nGo,6)+']',;
+				'DbGoto('+str(nGo,6)+')')
+		DbGoto(nGo)
+
+	ElseIf nOp = 10 .and. TEST_DBSKIP
+	
+		nSkip := randomize(-1,2)
+		ShowOP('OP 10 - ['+_CurrAlias+'] DbSkip('+str(nSkip,3)+')' ,;
+					'DbSkip('+str(nSkip,3)+')')
+		DbSkip(nSkip)
+
+	ElseIf nOp = 11 .and. TEST_DBCOMMIT
+		ShowOP('OP 11 - ['+_CurrAlias+'] DbCommit','DbCommit()')
+		DbCommit()
+
+	ElseIf nOp = 12 .and. TEST_REPLACE
+	
+		If !bof() .and. !Eof() .and. !__aConfig[UPD_AND_UNLOCK]
+			If (IsAliasExcl() .or. IsRLocked(recno()) ) .or. Insano('Fielput sem LOCK')
+				ShowOP('OP 12 - ['+_CurrAlias+'] FieldPut...  R='+str(recno(),10,0))
+				nUpd := Randomize(1,_CurrMaxCpos+1)
+				aPutValues := {}
+				For nI := 0 to nUpd
+					If nI <> 0 
+						nC 	:= randomize(1,_CurrMaxCpos+1)
+					Else
+						nC  := 1 
+					Endif
+					xVal 	:= xValue(_CurrStru[nC][2],_CurrStru[nC][3],_CurrStru[nC][4])
+					FieldPut(nC,xVal)
+					aadd(aPutValues,{nC,xVal})
+				Next
+				IF __aConfig[USE_MEMOFIELD]
+					xVal 	:= xValue("M",10,0)
+					FieldPut(fieldpos("CPOM"),xVal)
+					aadd(aPutValues,{fieldpos("CPOM"),xVal})
+				Endif
+				MEMPutValues(alias(),recno(),aPutValues)
+			Endif
+		Endif
+
+	ElseIf nOp = 13 .and. lastrec() > MIN_ZAPRECS  .and. !__lInTran
+
+		If IsAliasExcl() .or. insano("ZAP de tabela SHARED")
+			ShowOP('OP 13 - ZAP ' , '__dbZap()')
+			ZAP
+		Endif
+
+	ElseIf nOp = 14 .and. !__lInTran
+
+		ShowOP('OP 14 - dbunlockall()','dbunlockall()')
+		dbunlockall()
+		FreeALLLocks()
+
+	ElseIf nOp = 15 .and. __Aconfig[REOPEN_ALIAS] .and. !__lInTran
+	
+		// Fecha e abre de novo a tabela
+		If randomize(1,10) = 1 
+			ShowOP('OP 15 - REOPEN '+_CurrAlias)
+			cOldAlias := alias()
+			MEMClose(cOldAlias)
+			FreeLocks()
+			dbclosearea()
+
+			If cOldAlias = 'TMP'
+
+				// Reabre temporário 
+				TEMPOpen()
+				TEMPSetIndex()
+
+			Else 
+
+				// Reabre arq. TRabalho
+				TRABOpen(cOldAlias)
+				TRABSetIndex()
+				FreeLocks()
+				If __aConfig[USE_RDDTEST] = 'TOPCONN' .and. __aConfig[TEST_TOPMAPPER ]
+					TCSRVMAP(cOldAlias,AllTrim(FieldName(1)))
+				Endif
+
+				If __aConfig[USE_RDDTEST] = 'TOPCONN' .and. __aConfig[TEST_TOPMAPPER ]
+					TCSRVMAP(alias(),AllTrim(FieldName(1)))
+				Endif
+			Endif
+			IF __aConfig[USE_BASICINDEX	 ]
+				dbsetorder(1)
+			Endif
+		Endif
+
+	ElseIf nOp = 16 .and. __Aconfig[USE_SETDELETE]
+		ShowOP('OP 16 - SET DELE ON ','SET DELETED ON')
+		SET DELETED ON
+
+	ElseIf nOp = 17 .and. __Aconfig[USE_SETDELETE]
+		ShowOP('OP 17 - SET DELE OFF','SET DELETED OFF')
+		SET DELETED OFF
+
+	ElseIf nOp = 18 .and. __Aconfig[REOPEN_INDEX] .and. __aConfig[USE_BASICINDEX	 ]
+
+		ShowOP('OP 18 - ['+_CurrAlias+'] REOPEN INDEX '+_CurrAlias+' - Order ('+strzero(indexord(),1)+')')
+
+		If _CurrAlias = 'TMP'
+			
+			TEMPSetIndex()
+			
+		ElseIf _CurrAlias = 'TRB'
+
+			DbClearIndex()
+			TRABSetIndex()
+	
+		Endif
+		ShowOP('OP 02 - ['+_CurrAlias+'] dbsetorder(1)','dbsetorder(1)')
+		dbsetorder(1)
+      
+	ElseIf nOp = 20 .and. lastrec() > 0 .and. !BOF() .and. !eof()  ; 
+			.and. !deleted() .and. __Aconfig[USE_SETDELETE]
+
+		IF !__aConfig[TEST_TOPMAPPER ]
+			// Só executa se nao estiver testando MAPPER
+
+		If (IsAliasExcl() .or. IsRLocked(recno()) ) .or. Insano('DbDelete sem LOCK')
+			ShowOP('OP 20 - ['+_CurrAlias+'] DbDelete() R='+str(recno(),10,0)+'',;
+						'DbDelete()')
+			dbdelete()
+			//MEMDelete(recno())
+		Endif
+
+		Endif
+
+	ElseIf nOp = 21  .and. ;
+			__Aconfig[USE_SETDELETE] .and. ;
+			lastrec() > 0 .and. !BOF() .and. !eof()
+
+		IF !__aConfig[TEST_TOPMAPPER ]
+
+			// Só executa RECALL se nao estiver testando MAPPER
+
+			If (IsAliasExcl() .or. IsRLocked(recno()) ) .or. Insano('DbRecall sem LOCK')
+				ShowOP('OP 21 - ['+_CurrAlias+'] DbReCall()  R='+str(recno(),10,0)+'',;
+							'DbReCall()')
+				dbrecall()
+				//MEMRecall(recno())
+			Endif
+	
+		Endif
+
+	ElseIf nOp = 22 .and. TEST_VERIFYENV
+		ShowOP('OP 22 - ['+_CurrAlias+'] Verify ENV')
+		cInfo := '('+alias()+') I '+strzero((nIdxOrd := indexord()),1)
+		cInfo += ' Type '+TcSrvType()
+		cInfo += ' R '+strzero(recno(),6)
+		cInfo += ' '+IIF(bof(),'BOF','')
+		cInfo += ' '+IIF(eof(),'EOF','')
+		cInfo += ' '+IIF(deleted(),'DEL','')
+		cInfo += ' T '+strzero((nLast := lastrec()),6)
+		ShowOP(cInfo)
+
+	ElseIf nOp = 23 .and. __aConfig[TEST_USETMP] .and. __aConfig[TEST_USETRB]
+	
+		// Troca de ALIAS 
+		
+		cNewAlias := aUsedAlias[randomize(1,len(aUsedAlias)+1)]
+		MEMSelectArea(cNewAlias)
+
+		ShowOP('OP 23 - DbSelectArea '+cNewAlias,'MEMSelectArea("'+cNewAlias+'")')
+ 
+	ElseIf nOp = 24 .and. USE_RLOCK
+	
+		// Nao faz rlock de arquivo exclusivo ... 
+		
+		If !IsAliasExcl() 
+		
+			IF (!bof() .and. !eof()) .or. Insano('RLock com arquivo em '+IIF(BOF(),"BOF","EOF"))
+			
+				nReg := recno()
+				If !IsRLocked(nReg)
+	
+					ShowOP('TRY OP 24 ( ) - ['+_CurrAlias+'] Rlock '+_CurrAlias+' '+str(nReg,8,0))
+					nTry := 0 
+					lLock := .t.
+					While !dbrlock(nReg)
+						If __aConfig[USE_RDDTEST] = 'TOPCONN'	
+							cOwner := TcInternal(53)
+						Else
+							cOwner := '(not avaliable)'
+						Endif
+						ShowOP('RETRY '+str(nTry,2)+' OP 24 (*) - ['+_CurrAlias+'] Rlock '+_CurrAlias+' '+str(nReg,8,0))
+						nTry++
+						sleep(100)
+						If nTry >= __aConfig[MAX_RETRY_RLOCK]  .or. RDDBreak()
+							lLock := .F.
+							EXIT
+						Endif
+					Enddo		
+		
+					If lLock
+
+						If __aConfig[UPD_AND_UNLOCK] .and. !__lInTran
+
+				 			aPutValues := {}
+
+							nUpd := Randomize(1,_CurrMaxCpos+1)
+							For nI := 1 to nUpd
+								nC 	:= randomize(1,_CurrMaxCpos)
+								xVal 	:= xValue(_CurrStru[nC][2],_CurrStru[nC][3],_CurrStru[nC][4])
+								FieldPut(nC,xVal)
+								aadd(aPutValues,{nC,xVal})
+							Next
+	
+							ShowOP('OP 24 - ['+_CurrAlias+'] Rlock '+_CurrAlias+' '+str(nReg,8,0)+' , UPDATE & UNLOCK','')
+
+							MEMPutValues(alias(),recno(),aPutValues)
+
+							dbrunlock(nReg)
+							dbskip()
+
+						ELSE
+
+							AddRLock(nReg)
+
+							ShowOP('OP 24 - ['+_CurrAlias+'] Rlock '+_CurrAlias+' '+str(nReg,8,0),;
+										'IF !DbrLock() ; UserException("LOCK FAILED") ; Endif')
+	
+						Endif									
+									
+					Else
+						cMsg := 'OP 24 - ['+_CurrAlias+'] FAIL TO Rlock '+_CurrAlias+' '+str(nReg,8,0)+" [OWNER "+cOwner+"]"
+						ShowOP(cMsg,'IF DbrLock() ; UserException("HOW CAN I LOCK") ; Endif')
+						IF SHOW_RLOCK_FAILED
+							conout(cMsg)
+						Endif
+			   		Endif
+
+				Endif
+		   		
+			Endif
+
+		Endif
+		
+	ElseIf nOp = 25 .and. HasAnyLock()  .and. !IsAliasExcl() .and. !__lInTran .and. TEST_RUNLOCK
+	
+		nReg := GetRLock() // Pega registro travado aleatoriamente
+
+		ShowOP('OP 25 - ['+_CurrAlias+'] RbrUnLock '+_CurrAlias+' '+str(nReg,8,0))
+
+		ShowOP('','DbGoto('+str(nReg,8,0)+')')
+		DbGoto(nReg)
+
+		ShowOP('','DbRUnlock('+str(nReg,8,0)+')')
+		dbrunlock(nReg)
+		
+		SetRUnlock(nReg)	// Solta lock no array de controle
+		
+	ElseIf nOp = 26 .and. __aConfig[USE_BASICINDEX	 ] .and. USE_INDEX3
+
+		ShowOP('OP 26 - ['+_CurrAlias+'] dbsetorder(3)','dbsetorder(3)')
+		dbsetorder(3)
+
+	ElseIf nOp = 27 .and. __aConfig[USE_SETFILTER] .and. TEST_CLEARFILTER
+
+		ShowOP('OP 27 - ['+_CurrAlias+'] DbClearFilter()','DbClearFilter()')
+		DbClearFilter()
+	
+	ElseIf nOp = 28 .and. __aConfig[USE_SETFILTER]
+	
+		/*
+											AQUI
+
+			Top4 permite fazer filtro com memo mas nao funciona
+			e nao dá erro ... e permite tb fazer filto com 
+			campo logico, mas vc é obrigado a comparar com .t. 
+		*/
+
+		IF SQLFILTER_TYPE = 1
+			lSqlFilter := .t.			
+		ElseIf SQLFILTER_TYPE = 2
+			lSqlFilter := .f.
+		Else
+			lSqlFilter := (randomize(1,3) == 2)
+		Endif
+		if lSqlFilter .and. TcSrvType()=='iSeries'
+			// Nao permitido filtro @ para as400
+			lSqlFilter := .f.
+		Endif
+		IF lSqlFilter
+			cCond := '@'
+		Else
+			cCond := ''
+		Endif
+
+		For nI := 1 to MAX_FILCPOS
+			
+			nCpo := randomize(1,_CurrMaxCpos)
+			
+			If _CurrStru[nCpo][2] = 'C' .or. _CurrStru[nCpo][2] = 'M'
+				// AQUI ! Campo MEMO ? ....
+				// Com top4 dá merda ...
+				cCond += fieldname(nCpo) +' '
+				cCond += aConds[randomize(1,7)] + ' '
+				cCond += "'"+xValue('C')+"'"
+			ElseIf _CurrStru[nCpo][2] = 'N'
+				cCond += fieldname(nCpo) +' '
+				cCond += aConds[randomize(1,7)] + ' '
+				cCond += str(xValue('N',1,0),10)
+			ElseIf _CurrStru[nCpo][2] = 'D'
+				IF lSqlFilter
+					cCond += fieldname(nCpo)
+					cCond += aConds[randomize(1,7)]
+					cCond += "'"+dtos(xValue('D'))+"'"
+				Else
+					cCond += 'dtos('+fieldname(nCpo)+') '
+					cCond += aConds[randomize(1,7)]
+					cCond += "'"+dtos(xValue('D'))+"'"
+				Endif
+			ElseIf _CurrStru[nCpo][2] = 'L'
+				// AQUI ! Campo Logico ? ....
+				// Com TOP 4 tem que comparar com .t.
+				IF lSqlFilter
+					cCond += fieldname(nCpo) +"='F'"
+				Else
+					cCond += fieldname(nCpo) +'=.T.'
+				Endif
+			Endif
+			
+			If nI <> MAX_FILCPOS
+				If lSqlFilter
+					cCond +=  ' AND '
+				Else
+					cCond +=  ' .AND. '
+				Endif
+			Endif
+		Next
+		
+		ShowOP('OP 28 - ['+_CurrAlias+'] ['+cCond+']')
+
+		// SET FILTER TO &(cCond) // 
+		SET FILTER TO &cCond.
+	                                      	
+	ElseIf nOp == 29 .and. __aConfig[TEST_TRAN] .and. lCServer .and. !__lInTran
+	
+		// Temporario
+		ShowOP('OP 22 - ['+_CurrAlias+'] Verify ENV')
+		cInfo := '('+alias()+') I '+strzero((nIdxOrd := indexord()),1)
+		cInfo += ' R '+strzero(recno(),6)
+		cInfo += ' '+IIF(bof(),'BOF','')
+		cInfo += ' '+IIF(eof(),'EOF','')
+		cInfo += ' '+IIF(deleted(),'DEL','')
+		cInfo += ' T '+strzero((nLast := lastrec()),6)
+		ShowOP(cInfo)
+
+		ShowOP('OP 29 - ['+_CurrAlias+'] BEGIN TRANSACTION','dbCommitAll() , __BeginTran()')
+
+		dbCommitAll()
+		
+		If __aConfig[USE_RDDTEST] = 'TOPCONN'
+			TCCOMMIT(1)
+		Else
+		   __BEGINTRAN()
+		Endif
+
+		// Define que está em transação e define o numero de 
+		// operações que serão feitas ...
+	   __lInTran	:= .T.
+	   nInTran 		:= nLapsGo + __aConfig[MIN_OPERTRAN]
+
+	ElseIf nOp == 30 .and. __aConfig[TEST_TRAN] .and. lCServer ;
+						  .and. __lInTran .and. nLapsGo > nInTran 
+	
+		// Confirma a transação 
+
+		ShowOP('OP 30 - ['+_CurrAlias+'] END TRANSACTION','__EndTran()')
+		// Conout('OP 30 - ['+_CurrAlias+'] END TRANSACTION')
+
+		dbCommitAll()
+
+		If __aConfig[USE_RDDTEST] = 'TOPCONN'
+			TCCOMMIT(2,'KKRDDTEST')
+			TCCOMMIT(4)
+		Else
+		   __ENDTRAN()
+	   	Endif
+   	
+		DbUnlockAll()
+		FreeALLLocks()
+
+
+	   __lInTran := .F.
+	   nInTran := 0
+
+	ElseIf nOp == 31
+	
+		nSpend := seconds()-nTimeStart
+		cMsg := 'Lap '+str(nLapsGo,6)+' Timer '+str(nSpend,12,3)+' s. ('+str(nSpend/nLapsGo,8,3)+' tpv )'
+		ShowOP('OP 31 - '+cMsg,'')
+
+	ElseIf nOp == 32 .and. !__lInTran .and. _CurrAlias = 'TMP' .and. nLapsGo > nInFile
+
+		// Pega estrutura atual 
+		// aCampos := aclone(_CurrStru)
+		
+		IF randomize(1,3) = 1 
+			// Apaga e recria a tabela temporaria com outro nome
+			cTable := NewTable()
+			ShowOP('OP 32 A - FERASE ('+cArq+') / CREATE ('+cTable+')','')
+  		Else
+			// Recria com o mesmo nome 
+			cTable := cArq
+			ShowOP('OP 32 B - FERASE ('+cArq+') / CREATE ('+cTable+')','')
+  		Endif
+
+		MEMClose(alias())
+		FreeLocks()
+		dbclosearea()
+
+		ferase(RDDPATH+cArq+'.dtc')
+		ferase(RDDPATH+cArq+'1.idx')
+		ferase(RDDPATH+cArq+'2.idx')
+		ferase(RDDPATH+cArq+'3.idx')
+		If __aConfig[USE_EXTRAINDEX]
+			ferase(RDDPATH+cArq+'4.opx')
+			ferase(RDDPATH+cArq+'5.opx')
+		Endif
+
+		cArq := cTable
+
+		// Cria com nova estrutura 
+		aCampos 	:= GetKStruct(.T.)
+
+		TEMPCreate(cArq,aCampos)
+		TEMPOpen()
+		TEMPNewIndex()
+		TEMPSetIndex()
+
+		nInFile 		:= nLapsGo + __aConfig[MIN_OPERTRAN]
+
+	ElseIf nOp == 33 .and. !__lInTran .and. _CurrAlias = 'TMP' .and. lastrec()>150
+
+		// acrescenta dados da tabela shared na exclusiva...
+		ShowOP('OP 33 - APPEND FROM RDDTEST','')
+
+		If __aConfig[USE_RDDTEST] <> 'TOPCONN'
+			APPEND FROM (RDDPATH+RDDTEST_TABLE) VIA __aConfig[USE_RDDTEST] ALL
+		Else
+			APPEND FROM RDDTEST_TABLE VIA __aConfig[USE_RDDTEST] ALL
+		Endif
+
+	ElseIf nOp == 34 .and. !__lInTran .and. _CurrAlias = 'TMP' .and. lastrec()>150
+
+		// Fecha e Apaga tabela temporaria atual 
+		// Cria nova temporaria com dados da atual , com COPY TO 
+	
+		cTable := NewTable()
+
+		ShowOP('OP 34 - FERASE '+cArq+'/ COPY TO '+cTable+' & REOPEN !!!','')
+
+		MEMClose(alias())
+		FreeLocks()
+		dbclosearea()
+		ferase(RDDPATH+cArq+'.dbf')
+		ferase(RDDPATH+cArq+'.dtc')
+		ferase(RDDPATH+cArq+'1.idx')
+		ferase(RDDPATH+cArq+'2.idx')
+		ferase(RDDPATH+cArq+'3.idx')
+		ferase(RDDPATH+cArq+'4.opx')
+		ferase(RDDPATH+cArq+'5.opx')
+
+		cArq := cTable
+
+		MEMSelectArea( "TRB" )
+		COPY TO (RDDPATH+cArq) VIA __aConfig[USE_RDDTEST] ALL
+
+		KFileOpen(cArq,"TMP",.t.)
+		TEMPNewIndex(cArq)
+		TEMPSetIndex(cArq)
+		
+	ElseIf nOp == 35 .and. __aConfig[TEST_TRAN] .and. lCServer ;
+						  .and. __lInTran .and. nLapsGo > nInTran .and. ;
+						  randomize(1,6) = 1 .and. __aConfig[TEST_CANROLLBACK]
+	
+		// ROLLBACK DA TRANSAçãO !!!
+
+		ShowOP('OP 35 - ['+_CurrAlias+'] ROLL BACK TRANSACTION','__RollBackTran()')
+		// conout('OP 35 - ['+_CurrAlias+'] ROLL BACK TRANSACTION')
+
+		dbCommitAll()
+
+		If __aConfig[USE_RDDTEST] = 'TOPCONN'
+			TCCOMMIT(3)
+			TCCOMMIT(4)
+		Else
+		   __RollBackTran()
+	   	Endif
+   	
+	   __lInTran := .F.
+	   nInTran := 0
+
+	ElseIf nOp = 36 .and. __aConfig[USE_BASICINDEX	 ] .and. __aConfig[USE_EXTRAINDEX]
+
+		ShowOP('OP 36 - ['+_CurrAlias+'] dbsetorder(4)','dbsetorder(4)')
+		dbsetorder(4)
+
+	ElseIf nOp = 37 .and. __aConfig[USE_BASICINDEX	 ] .and. __aConfig[USE_EXTRAINDEX]
+
+		ShowOP('OP 37 - ['+_CurrAlias+'] dbsetorder(5)','dbsetorder(5)')
+		dbsetorder(5)
+
+
+	ElseIf nOP = 38 .and. __aConfig[USE_SUPERFILE	]
+	
+		ShowOP('OP 38 - ['+SPF_RDDTEST+'] SPF_CANOPEN','SPF_CANOPEN("'+SPF_RDDTEST+'")')
+		FSuperNew()
+	
+	ElseIf nOP = 39 .and. __aConfig[USE_SUPERFILE	]
+
+		ShowOP('OP 39 - ['+SPF_RDDTEST+'] SPF_CLOSE','SPF_CLOSE("'+SPF_RDDTEST+'")')
+		FSuperClose()
+
+	ElseIf nOP = 40 .and. __aConfig[USE_DBREINDEX	] .and. !__lInTran
+
+		// Nao pode reindexar se estiver em transação	
+
+ 		If IsAliasExcl() .or. Insano('DbReindex SEM ACESSO EXCLUSIVO')
+			ShowOP('OP 40 - DBReindex()','')
+			DBReindex()
+		Endif
+				 
+	ElseIf nOp = 41
+	
+		ShowOP('OP 41 - Dbf()','Dbf()')
+		if !(dbf() == alias())
+			UserException('Alias() <> DBF()')
+		Endif
+
+	ElseIf nOp = 42 // Verificar filtro setado 
+
+		ShowOP('OP 42 - DbFilter()','')
+		cFiltro := DbFilter()
+
+	ElseIf nOp = 43
+
+		ShowOP('OP 43 - DbStruct()','')
+
+		aStru := DbStruct()
+
+		Nxt := len(aStru)
+		For nI := 1 to Nxt
+			
+			If !( aStru[nI][1] == DBFIELDINFO(1,ni) )
+				UserException("Problema DBFIELDINFO 1")
+			ElseIf !( aStru[nI][2] == DBFIELDINFO(2,ni) )
+				UserException("Problema DBFIELDINFO 2")
+			ElseIf !( aStru[nI][3] == DBFIELDINFO(3,ni) )
+				UserException("Problema DBFIELDINFO 3")
+			ElseIf !( aStru[nI][4] == DBFIELDINFO(4,ni) )
+				UserException("Problema DBFIELDINFO 4")
+			Endif
+
+		Next
+
+	Elseif nOp = 44 // RecSize
+
+		ShowOP('OP 44 - RecSize()','')
+		nRSize := RecSize()
+		If nRSize < 0
+			userexception("INVALID RecSize RETURN ("+str(RecSize,16,5)+")")
+		Endif
+
+	ElseIf nOp = 45 .and. USE_DBCLOSEALL .and. ;
+			__Aconfig[REOPEN_ALIAS] .and. !__lInTran .and. randomize(1,10)=1
+	
+		// Fecha e abre de novo todas as tabelas
+		
+		IF !__aConfig[TEST_TOPMAPPER ]
+			// Só executa se nao estiver testando MAPPER
+
+			cAlias := _CurrAlias
+			
+			ShowOP('OP 45 - DBCLOSEALL & REOPEN ('+_CurrAlias+')')
+	
+			lOpenTRB := (select('TRB')>0)
+			lOpenTRX := (select('TRX')>0)
+			lOpenTMP := (select('TMP')>0)
+			
+			dbCloseALL()
+			// MEMCloseAll()
+	
+			If lOpenTMP
+				TEMPOpen()
+				TEMPSetIndex()
+			Endif
+	
+			If lOpenTRB
+				TRABOpen()
+				TRABSetIndex()
+				FreeLocks()
+				If __aConfig[USE_RDDTEST] = 'TOPCONN' .and. __aConfig[TEST_TOPMAPPER ]
+					TCSRVMAP(alias(),AllTrim(FieldName(1)))
+				Endif
+			Endif
+	
+			If lOpenTRX
+				TRABOpen('TRX')
+				TRABSetIndex()
+				FreeLocks()
+			Endif
+
+			IF __aConfig[USE_BASICINDEX	 ]
+				dbsetorder(1)
+			Endif
+	
+			MEMSelectArea(cAlias)
+	
+		Endif
+	
+	ElseIf nOp = 46 .and. __aConfig[USE_RDDTEST] = 'TOPCONN' .and. __aConfig[TEST_TOPMAPPER ]
+
+		// OPA ! Verificar como é que "liga" certinho o "mapa"
+		
+		cStrMap := GetRandmap()
+		If !empty(cStrMap)
+			ShowOP('OP 46 - TOP MAPPER ON ('+cStrMap+')','')
+			TCSRVMAP(alias(),cStrMap)
+		Else
+			ShowOP('OP 46 - TOP MAPPER OFF','')
+			TCSRVMAP(alias(),,.f.)
+		Endif	
+
+	ElseIf nOP = 47 .and. __aConfig[USE_SUPERFILE	]
+
+		ShowOP('OP 47 - ['+SPF_RDDTEST+'] SPF_MISC')
+		FSuperMisc()
+
+	ElseIf nOP = 48
+	
+		ShowOP('OP 48 - dbCommitAll()')
+		dbCommitAll()
+
+	ElseIf nOP = 49 .and. __aConfig[TEST_SPEXEC] .and. __aConfig[USE_RDDTEST] = 'TOPCONN'
+	
+		cMsgError := ''
+		ShowOP('OP 49 - TCSPEXEC')
+			
+		/*
+		xSPRet := TCSPExec("AUTOMAN_SP1",15994,3,3,'Parametro 1 ','Parametro 2 ')
+		if !(len(xSPRet)=3 .and. xSPRet[1] == 16000 .and. !empty(xSPRet[2]) .and. !empty(xSPRet[3]))
+			varinfo('',xSPRet)
+			UserException("PROBLEMAS DE CHAMADA / RETORNO DE AUTOMAN_SP1")
+		Endif   
+		*/
+
+		xSpValues := {	xValue("N",5,0),;
+						xValue("N",5,0),;
+						xValue("N",5,0),;
+						xValue("C",MAXSIZE_SPEXEC,0),;
+						xValue("C",MAXSIZE_SPEXEC,0) }
+		
+		xSPRet := TCSPExec("AUTOMAN_SP1",xSpValues[1],xSpValues[2],xSpValues[3],xSpValues[4],xSpValues[5])
+				
+/*
+		if empty(xSPRet) .or. !(len(xSPRet)=3 .and. xSPRet[1] > 0 .and. !empty(xSPRet[2]) .and. !empty(xSPRet[3]))
+			varinfo('xSPValues',xSpValues)
+			varinfo("xSPRet",xSPRet)
+			conout("---PROBLEMAS DE CHAMADA / RETORNO DE AUTOMAN_SP1---")
+		Endif   
+*/
+
+
+	ElseIf nOP = 50 .and. TEST_SETTRIGGER
+
+		IF  select("TRX")>0
+			ShowOP('OP 50 - FldSettrigger TRX ')
+			FldSettrigger( TRX->CPOC , VM_INSERT + VM_UPDATE + VM_DELETE ,  {|x,y| RTrigger(x,y,'ALL')}	)
+    	ElseIf select("TRB")>0
+			ShowOP('OP 50 - FldSettrigger TRB ')
+			FldSettrigger( TRB->CPOC , VM_INSERT + VM_UPDATE + VM_DELETE ,  {|x,y| RTrigger(x,y,'ALL')}	)
+    	Endif
+
+	ElseIf nOP = 51 .and. TEST_SETTRIGGER
+	
+		IF  select("TRX")>0
+			ShowOP('OP 50 - FLDCLEARTRIGGER TRX ')
+			FLDCLEARTRIGGER( TRX->CPOC )
+    	ElseIf select("TRB")>0
+			ShowOP('OP 50 - FLDCLEARTRIGGER TRB ')
+			FLDCLEARTRIGGER( TRB->CPOC )
+    	Endif
+	
+	ElseIf nOp = 52 .and. __aConfig[USE_BASICINDEX	 ]
+
+		ShowOP('OP 52 - ['+_CurrAlias+'] dbsetorder(0)','dbsetorder(0)')
+		dbsetorder(0)
+
+	ElseIf nOp = 53 .and. __aConfig[USE_RDDTEST] = 'TOPCONN' .and. TEST_QUERYES
+
+		ShowOP('OP - Select Query','')
+		cOldAlias := alias()
+		aStruTmp := dbstruct()
+		cQuery := "select * FROM RDDTEST"
+		If "400"$TcGetDb()		
+			cQuery += " FOR READ ONLY"
+		Endif
+		DbUseArea(.T., 'TOPCONN', TcGenQry(,,cQuery), 'QRYALL', .T., .T.)
+		For nX := 1 To Len(aStruTmp)
+			If aStruTmp[nX][2]$"DLN"
+				TcSetField('QRYALL',aStruTmp[nX][1],aStruTmp[nX][2],aStruTmp[nX][3],aStruTmp[nX][4])
+			EndIf
+		Next nX			
+    	While !(QRYALL->(Eof()))
+			QRYALL->(DbSkip())
+		Enddo
+		QRYALL->(DbCloseArea())
+		If !empty(cOldAlias)
+			dbselectarea(cOldAlias)
+		Endif
+
+	ElseIf nOp = 54 .and. __aConfig[USE_RDDTEST] = 'TOPCONN' .and. TEST_TCSETPARAM 
+
+		xPar := strzero(randomize(0,99),2,0)
+		ShowOP('OP - TcSetParam("'+xPar+'")','TcSetParam("'+xPar+'")')
+		xRet := TCSetParam("FILIAL",xPar)
+		If xRet <> 0 
+			varinfo("xRet",xRet)
+			UserException(GetDBID()+" SETPARAM('"+xPar+"') FAILED")
+		Endif
+	
+	ElseIf nOp = 55 .and. __aConfig[USE_RDDTEST] = 'TOPCONN'  .and. TEST_TCINTERNAL
+
+		ShowOP('OP - TCTestInt()','TCTestInt()')
+		TCTestInt()
+
+	ElseIf nOp = 56  .and. __aConfig[USE_RDDTEST] = 'TOPCONN' .and. TEST_TCVLOCK
+
+		TOPTSTLOCK()
+		
+	ElseIf nOp = 57  .and. __aConfig[USE_RDDTEST] = 'TOPCONN' .and. TEST_TCSQLEXEC
+
+		TOPTSTEXEC()
+
+	Endif
+
+	// Arrebenta o TOP alocando memoria 
+	IF TOP_MALLOC
+		tcinternal(86,"TOPMALLOC")
+    Endif
+    
+	IF lPreDef .and. Len(aOP)=0
+		exit
+	Endif
+
+Enddo
+
+cMsg := str(ThreadId(),10)+' END '+cArq
+ShowOp(cMsg)
+conout(cMsg)
+
+RETURN
+
+
+/* -----------------------------------------------------------------------
+Funcao 		GetKStruct()
+Autor		Julio Wittwer
+Descrição	Retorna estrutura de tabela padrão para testes
+----------------------------------------------------------------------- */
+STATIC Function GetKStruct(lRandom)
+Local aCampos :=  {}
+Local nAdd := 0 , nX := 0
+DEFAULT lRandom := .F.
+
+aadd(aCampos,{'CPOC','C',SIZE_CHARFIELD,0})
+aadd(aCampos,{'CPON','N',10,0})
+aadd(aCampos,{'CPOD','D',08,0})
+aadd(aCampos,{'CPOL','L',01,0})
+
+If lRandom
+	nAdd := randomize(1,121)
+	For nX := 1 to nAdd
+		cTipoField := RandomChar('CNDL')
+		If cTipoField="C"
+			nSize := randomize(1,129)
+		ElseIf cTipoField="D"
+			nSize := 8
+		ElseIf cTipoField="L"
+			nSize := 1
+		ElseIf cTipoField="N"
+			nSize := randomize(1,18)
+		Endif
+		aadd(aCampos,{'CPO'+cTipoField+'_'+strzero(nX,3),cTipoField,nSize,0})
+	Next
+Endif
+
+IF __aConfig[USE_MEMOFIELD]
+	aadd(aCampos,{'CPOM','M',10,0})
+Endif
+
+Return aCampos
+
+/* -----------------------------------------------------------------------
+Funcao 		ShowOP(cMsg,cCmd)
+Autor			Julio Wittwer
+Descrição	Funcao de Monitoramento de informações. 
+----------------------------------------------------------------------- */
+static function showOP( cMsg, cCmd )
+	if( __aConfig[SHOWOP_INFO] = 0 )
+		// Sem echo
+		return
+	elseIf( __aConfig[SHOWOP_INFO] = 2 .and. !empty( cCmd ) )
+		// Comandos - Sempre para console
+		conOut( cCmd )
+		if( __aConfig[SHOWOP_SAVE] )
+			fwrite( __nHLOG, strzero( seconds(), 12, 3 ) + " " + cCmd + CRLF )
+		endif
+	elseIf( !empty( cMsg ) )
+		// Monitor e/ou console. 
+		// Monitor sempre atualiza
+		// Console só se habilitado
+		if( __lInTran )
+			cMsg := "[INTRAN] " + cMsg 
+		endif
+		ptInternal( 1, cMsg )
+		if( __aConfig[SHOWOP_INFO] = 1 )
+			conOut( str( threadId(), 8 ) + " -> " + cMsg + iif( !empty( cCmd ), " : " + cCmd, "" ) )
+		endif
+		if( __aConfig[SHOWOP_SAVE] )
+			fwrite( __nHLOG, strzero( seconds(), 12, 3 ) + " " + cMsg + iif( !empty( cCmd ), " : " + cCmd, "") + CRLF )
+		endif	
+	endif
+return
+
+// Abertura de tabelas 
+Static Function KFileOpen( cFile, cAlias, lExcl )
+local nTry := 10
+local cArqName := cFile
+if( __aConfig[ USE_RDDTEST ] <> "TOPCONN" )
+	cFile := RDDPATH + cFile
+endif
+while .T.
+	showOp( "USE (" + cFile + ") alias (" + cAlias + ") " + iif( lExcl, "EXCLUSIVE", "SHARED" ) + " NEW VIA " + __aConfig[ USE_RDDTEST ] )
+	if!( lExcl )
+		USE (cFile) alias (cAlias) SHARED NEW VIA __aConfig[USE_RDDTEST]
+	else
+		USE (cFile) alias (cAlias) EXCLUSIVE NEW VIA __aConfig[USE_RDDTEST]
+	endif
+
+	if!( neterr() )
+		MEMOpen( cArqName, cAlias, lExcl )
+		exit
+	endif
+
+	conOut( "FAILED (" + strZero( 11-nTry, 2, 0 ) + ") to open " + cFile + " / " + cAlias + " / " + iif( lExcl, "EXCLUSIVE", "SHARED" ) )
+	nTry--
+	if( nTry < 0 )
+		userException( "FAILED TO OPEN " + cFile + " / " + cAlias + " / " + iif( lExcl, "EXCLUSIVE", "SHARED" ) )
+	endif
+
+	sleep(250)
+endDo
+
+if( __aConfig[USE_RDDTEST] = "TOPCONN" .and. __aConfig[ TEST_TOPMAPPER ] )
+	// Mapeia primeiro campo no Mapper na abertura
+	tcSrvMap( alias(), allTrim( fieldName( 1 ) ) )
+endif
+
+return 
+
+/* -------------------------------------------------------------------
+Funcao de Criação de Tabela Exclusiva  ( Temporaria ) 
+------------------------------------------------------------------- */
+STATIC Function TEMPCreate(cArq,aCampos)
+Local nI
+ShowOp('Vai criar '+cArq)
+
+If __aConfig[USE_RDDTEST] <> "TOPCONN"
+	DbCreate(RDDPATH+cArq,aCampos,__aConfig[USE_RDDTEST])
+Else
+	If Tccanopen(cArq)
+		conout('Deletando & recriando ['+cArq+'] (TOP)')
+		tcdelfile(cArq)
+	Endif
+	DbCreate(cArq,aCampos,__aConfig[USE_RDDTEST])
+Endif
+
+If DELETE_TOPFIELD
+	tcsqlexec("DELETE FROM TOP_FIELD WHERE FIELD_TABLE = '"+cArq+"'")
+Endif
+
+ShowOp("Create TABLE ["+cArq+"] Rdd ["+__aConfig[USE_RDDTEST]+"]")
+ShowOp(,'aCpos := {}')
+
+For nI := 1 to len(aCampos)
+	ShowOp(,'aadd(aCpos,{"'+aCampos[nI][1]+'","'+aCampos[nI][2]+'",'+str(aCampos[nI][3],3)+','+str(aCampos[nI][4],2)+'})')
+Next
+
+ShowOp(,'DbCreate("'+cArq+'",aCpos,"'+__aConfig[USE_RDDTEST]+'")')
+
+__TempFile := cArq
+
+Return
+
+STATIC Function TEMPOpen(cAlias,lExclusive)
+
+DEFAULT cAlias := 'TMP'
+DEFAULT lExclusive := .t.
+
+ShowOp('Abrindo '+__TempFile+' Alias '+cAlias+' '+;
+		IIF(lExclusive,'EXCLUSIVE','SHARED')+' rdd ['+__aConfig[USE_RDDTEST]+']')
+
+KFileOpen(__TempFile,cAlias,lExclusive)
+ShowOp(,'USE '+__TempFile+' ALIAS TMP EXCLUSIVE NEW VIA "'+__aConfig[USE_RDDTEST]+'"')
+
+Return
+
+
+/* ----------------------------------------------------------------
+Funcao		xValue(cType,nTam,nDec)
+Descrição	Retorna um dado aleatorio de acordo com o tipo de campo
+---------------------------------------------------------------- */
+STATIC Function xValue(cType,nCSize,nDec)
+Local cRet := '' , nMinimo 
+If cType='C' 
+	If nCSize = NIL
+		Return chr(randomize(65,91))
+	Endif
+	nCSize := randomize(1,nCSize+1+CHAR_OVERFLOW)
+	While nCSize > 0 
+		cRet += chr(randomize(65,91))
+//		cRet += chr(randomize(33,255))
+		nCSize--
+	Enddo
+	Return cRet
+ElseIf cType='M'
+	// Tamanho entre 0 e 200 .... 
+	Return replicate("#",randomize(MEMO_MINSIZE,MEMO_MAXSIZE))
+ElseIf cType='N'
+	DEFAULT nCSize := 1
+	Return randomize(1,10*nCSize)
+ElseIf cType='D'
+	Return date()+randomize(-100,100)
+ElseIf cType='L'
+	Return randomize(1,3)=1
+Endif
+UserException('Unknow Type ['+cType+']')
+Return NIL
+
+
+/* ----------------------------------------------------------------
+Funcao		xInit(cType)
+Descrição	Retorna um dado aleatorio de acordo com o tipo de campo
+---------------------------------------------------------------- */
+STATIC Function xInit(cType,nSize)
+If cType='C' .or. cType='M'
+	Return replicate('0',nSize)
+ElseIf cType='N'
+	Return 0
+ElseIf cType='D'
+	Return date()
+ElseIf cType='L'
+	Return .F.
+Endif
+UserException('Unknow Type ['+cType+']')
+Return NIL
+
+/* ------------------------------------------------------------------------
+Funcao 		NewTable()
+Autor			Julio Wittwer
+Descrição	Retorna nome novo para a tabela , nesta thread
+------------------------------------------------------------------------ */
+STATIC Function NewTable()
+__UseTable++
+If __UseTable >999
+	__UseTable := 1
+Endif
+Return 'T'+alltrim(str(threadid(),8))+strzero(__UseTable,3)
+
+/* ----------------------------------------------------------------
+Funcao		Insano(cMsg)
+Descrição	Retorna .T. se a operação será "insana"
+---------------------------------------------------------------- */
+STATIC Function Insano(cMsg)
+If __aConfig[INSANE_LEVEL] > 0 .and. randomize(1,101) <= __aConfig[INSANE_LEVEL]
+	conout('[INSANIDADE] '+IIF(__lInTran,'[INTRAN] ','')+str(ThreadId(),8)+' -> '+cMsg)
+	Return .T.
+Endif
+Return .F.
+
+
+/* ----------------------------------------------------------------
+Funcao		CleanRddTest
+Descrição	Limpa o ambiente de testes e cria tabela "Shared" para o teste
+---------------------------------------------------------------- */
+Static Function CleanRDDTEST()
+Local aCampos 		:= GetKStruct()
+
+Cursorwait()
+
+// Limpa global de Break
+PutGlbValue('RDDTEST_BREAK','')
+
+If MsgYesNo("Confirma limpeza da pasta ["+RDDPATH+"]? ")
+	RDDTestInit()
+Endif
+
+If MsgYesNo("Confirma recriação do ambiente na pasta ["+RDDPATH+"]? ")
+	
+	Conout('Criando Tabela RDDTEST...')
+	
+	If __aConfig[USE_RDDTEST] = 'TOPCONN'
+		
+		TSTTopInit()
+
+		IF "DB2"$upper(tcgetdb())
+			conout(str(ThreadId(),10)+" Db2 Application ID = "+GetDBID())
+		Endif
+
+		IF TCIsvLock()	
+			conout(str(ThreadId(),10)+" Virtual Lock Engine OK")
+		Else
+			conout(str(ThreadId(),10)+" Virtual Lock Engine UNAVALIABLE")
+		Endif
+
+		// Cria stored Procedure ( apenas cria, sem teste ) 
+		// U_SPTest(.F.)
+
+		If Tccanopen(RDDTEST_TABLE)
+			tcdelfile(RDDTEST_TABLE)
+		Endif
+		varinfo("aCampos",aCampos)
+		DbCreate(RDDTEST_TABLE,aCampos,__aConfig[USE_RDDTEST])
+		
+		IF DELETE_TOPFIELD
+			tcsqlexec("DELETE FROM TOP_FIELD WHERE FIELD_TABLE = RDDTEST_TABLE")
+		Endif
+
+		KFileOpen(RDDTEST_TABLE,"TRB",.T.)
+		
+	Else
+		
+		DbCreate(RDDPATH+RDDTEST_TABLE,aCampos,__aConfig[USE_RDDTEST])
+		
+		KFileOpen(RDDTEST_TABLE,"TRB",.T.)
+		
+	Endif
+	
+	TRABNewIndex()
+	
+	DbCloseArea()
+	
+Endif
+
+Cursorarrow()
+
+Return
+
+/* -----------------------------------------------------------------------------
+Funcao		RDDBreak()
+Descrição	Finaliza __QUIT a Thread atual, caso o servidor esteja sendo baixado
+				ou foi alimentada a GLobal de "Finalização de Servidor" 
+----------------------------------------------------------------------------- */
+STATIC Function RDDBreak()
+If KillApp() .or. !empty(GetGlbValue('RDDTEST_BREAK'))
+
+	conout(str(ThreadId(),10)+' [RDD_BREAK]')
+	IF len(aLocks) > 0 
+		varinfo('aLocks',aLocks)
+	Endif
+	If !empty(alias())
+	cInfo := '('+alias()+') I '+strzero((nIdxOrd := indexord()),1)
+	cInfo += ' R '+strzero(recno(),6)
+	cInfo += ' '+IIF(bof(),'BOF','')
+	cInfo += ' '+IIF(eof(),'EOF','')
+	cInfo += ' '+IIF(deleted(),'DEL','')
+	cInfo += ' T '+strzero((nLast := lastrec()),6)
+	Else
+		cInfo := 'NO WORKAREA IN USE'
+	endif
+	ShowOP(cInfo)
+	
+	__QUIT()
+	Return .T.
+Endif
+Return .F.
+
+/* ----------------------------------------------------------------
+				TRATAMENTO DE ERRO - STRESS DE RDD
+---------------------------------------------------------------- */
+Static Function RDDError(e)
+Local nStack := 2 , cErrorMSG := ''
+cErrorMSG += replicate('=',79) + CRLF
+cErrorMSG += 'Thread .........: '+Str(ThreadId(),12) + CRLF
+cErrorMSG += 'Error ..........: '+e:description + CRLF
+cErrorMSG += 'Environment ....: '+GetEnvServer() + CRLF
+cErrorMSG += 'Date / Time ....: '+dtos(date())+' '+time() + CRLF
+if used()
+cErrorMSG += 'Alias  .........: '+Alias() + CRLF
+cErrorMSG += 'IndexOrd .......: '+Str(IndexOrd(),3) + CRLF
+cErrorMSG += 'IndexKey .......: '+IndexKey() + CRLF
+cErrorMSG += 'Recno ..........: '+Str(Recno(),6) + CRLF
+cErrorMSG += 'BOF ............: '+IIF(BOF(),'TRUE','FALSE') + CRLF
+cErrorMSG += 'EOF ............: '+IIF(EOF(),'TRUE','FALSE') + CRLF
+Endif
+While !empty(procname(nStack))
+	If nStack = 2
+		cErrorMSG += 'Stack ...............: '
+	Else
+		cErrorMSG += '                       '
+	Endif
+	cErrorMSG += 'Called From '+procname(nStack) + " ("+str(procline(nStack),6,0)+")"+CRLF
+	nStack++
+Enddo
+cErrorMSG += replicate('=',79) + CRLF
+conout(cErrorMSG)
+If __aConfig[EXCEPTION_BREAK]
+	PutGlbValue('RDDTEST_BREAK','BREAK')
+Endif
+BREAK
+
+
+STATIC Function UpdateThreads(oThreads,aSayThreads)
+Local aFnRun := FindThread('RDDJTEST,EATFILES,EATJOBS,OPENSPF',getenvserver())
+Local nI , nT := len(aFnRun) , cLine := ''
+asize(aSayThreads,0)
+If nT > 0 
+	For nI := 1 to nT
+		cLine := 	'Thread ['+str(aFnRun[nI][3],6)+'] '+ aFnRun[nI][11]
+		aadd(aSayThreads,cLine)
+	Next
+Else
+	aadd(aSayThreads,'(nenhuma)')
+Endif
+oThreads:SetArray( aSayThreads )
+oThreads:bLine := oThreads:Cargo
+oThreads:Refresh()
+Return
+
+	/*
+	aRun -> ARRAY (    1) [...]
+	     aRun[1] -> ARRAY (   11) [...]
+	          aRun[1][1] -> C (    9) [siga0984_]
+	          aRun[1][2] -> C (    7) [AUTOMAN]
+	          aRun[1][3] -> N (   15) [      2624.0000]
+	          aRun[1][4] -> C (    0) []
+	          aRun[1][5] -> C (    8) [RDDJTEST]
+	          aRun[1][6] -> C (   20) [ADVPLTESTS_TOP_CTREE]
+	          aRun[1][7] -> C (   25) [Wed Jul 07 14:35:59 2004
+	]
+	          aRun[1][8] -> C (    8) [00:00:07]
+	          aRun[1][9] -> N (   15) [         0.0000]
+	          aRun[1][10] -> N (   15) [     12000.0000]
+	          aRun[1][11] -> C (   40) [OPEN \rddtest\2624_003 / TMP / EXCLUSIVE]
+	*/
+
+// Cria indices temporarios para a Tabela
+// PS : indices básicos permanentes
+STATIC Function TEMPNewIndex()
+local nRet
+
+If __aConfig[USE_BASICINDEX	 ]
+	
+	IF __aConfig[USE_RDDTEST] <> "TOPCONN"
+		
+		Index on CPOC TAG (__TempFile+'1') TO (RDDPATH+__TempFile+'.cdx')
+		Index on CPON TAG (__TempFile+'2') TO (RDDPATH+__TempFile+'.cdx')
+		Index on CPOD TAG (__TempFile+'3') TO (RDDPATH+__TempFile+'.cdx')
+		If __aConfig[USE_EXTRAINDEX]
+			Index on CPOC TO (RDDPATH+__TempFile+'4.opx')
+			Index on CPOC TO (RDDPATH+__TempFile+'5.opx')
+		Endif
+		
+	Else
+		
+		Index on CPOC+STR(CPON,10)+CPOD TO (__TempFile+'1')
+		Index on CPON TO (__TempFile+'2')
+		Index on CPOD TO (__TempFile+'3')
+		If __aConfig[USE_EXTRAINDEX]
+			Index on CPOC TO (__TempFile+'4')
+			Index on CPOC TO (__TempFile+'5')
+		Endif
+		
+	Endif
+	
+Endif
+
+Return
+
+// Abre indices temporarios para a Tabela Temporária
+STATIC Function TEMPSetIndex()
+
+If __aConfig[USE_BASICINDEX	 ]
+	
+	IF __aConfig[USE_RDDTEST] <> "TOPCONN"
+		
+		If !file(RDDPATH+__TempFile+'.cdx')
+			REturn .f.
+		Endif
+		
+		DbClearIndex()
+		DbSetIndex(RDDPATH+__TempFile+'.cdx')
+		If __aConfig[USE_EXTRAINDEX]
+			DbSetIndex(RDDPATH+__TempFile+'4.opx')
+			DbSetIndex(RDDPATH+__TempFile+'5.opx')
+		Endif
+		dbsetorder(1)
+
+	Else
+		
+		DbClearIndex()
+		DbSetIndex(__TempFile+'1')
+		DbSetIndex(__TempFile+'2')
+		DbSetIndex(__TempFile+'3')
+		If __aConfig[USE_EXTRAINDEX]
+			DbSetIndex(__TempFile+'4')
+			DbSetIndex(__TempFile+'5')
+		Endif
+		dbsetorder(1)
+		
+	Endif
+	
+Endif
+
+Return .t.
+	
+// ========================================================
+STATIC Function TEMPDelIndex()
+
+If __aConfig[USE_BASICINDEX	 ]
+	ferase(RDDPATH+__TempFile+'1.idx')
+	ferase(RDDPATH+__TempFile+'2.idx')
+	ferase(RDDPATH+__TempFile+'3.idx')
+	If __aConfig[USE_EXTRAINDEX]
+		ferase(RDDPATH+__TempFile+'4.opx')
+		ferase(RDDPATH+__TempFile+'5.opx')
+	Endif
+Endif
+
+Return
+
+
+STATIC Function RandomChar(cLista)
+Return substr(cLista,randomize(1,len(cLista)+1),1)
+
+// =======================================================================
+STATIC Function MEMOpen(cArqName,cAlias,lExcl)
+Local aStru , lSetDel
+IF !__aConfig[MEMORY_CHECK]
+
+	_CurrAlias   := alias()
+	_CurrMaxCpos := len(dbstruct())
+	_COLRecno    := 0
+	_COLDeleted  := 0
+	_CurrLastRec := lastrec()
+	_CurrStru	 := dbstruct()
+
+	SetaliasExcl(cAlias,lExcl)
+
+Else
+
+
+	_CurrAPos := ascan(aMEMTables,{|x| x[1] == cArqName})
+	aStru  := dbstruct()
+	If _CurrAPos = 0
+		aadd(aMEMTables,array(7))
+		_CurrAPos := len(aMEMTables)
+	Endif
+
+	// Carrega status da Tabela
+	aMEMTables[_CurrAPos][2] := cAlias
+	aMEMTables[_CurrAPos][3] := aStru
+	aMEMTables[_CurrAPos][4] := {}
+	aMEMTables[_CurrAPos][5] := len(aStru)
+	aMEMTables[_CurrAPos][6] := lastrec()
+	aMEMTables[_CurrAPos][7] := lExcl
+
+	// Carrega dados da Tabela
+
+	// Desliga filtro de deletados
+	lSetDel := set(11)
+	SET DELETED OFF
+
+	dbsetorder(0)
+	dbgotop()
+	nTamStru := len(aStru)
+	aLine := array(nTamStru+2) // RECNO e DELETED
+	while !eof()
+		aeval(aStru,{|x,y| aLine[y] := fieldget(y)})
+		aLine[nTamStru+1] := recno()
+		aLine[nTamStru+2] := deleted()
+		aadd(aMEMTables[_CurrAPos][4],aclone(aLine))
+		dbskip()
+	Enddo
+
+	// Re-liga filtro, caso já estivesse ligado
+	If 	lSetDel
+		SET DELETED ON
+	Endif
+
+	dbgotop()
+
+	MEMSelectArea(cAlias)
+	
+Endif
+Return
+
+// ====================================================================
+STATIC Function MEMAppend()
+Local aLine , nNew
+If __aConfig[MEMORY_CHECK]
+	aLine := array(aMEMTables[_CurrAPos][5]+2)
+	aLine[aMEMTables[_CurrAPos][5]+2] := .F. // Deleted
+	aadd(aMEMTables[_CurrAPos][4],aclone(aLine))
+	nNew := len(aMEMTables[_CurrAPos][4])
+	IF __aConfig[MEMORY_ECHO]
+		conout("NEW MEMORY ALIAS ["+alias()+"] RECNO ARRAY "+str(nNew,6))
+	Endif
+Endif
+Return nNew
+
+// ====================================================================
+STATIC Function MEMPutValues(cAlias,nRecMEM,aPutValues)
+Local nI , nX
+IF __aConfig[MEMORY_CHECK]
+	nX := len(aPutValues)
+	For nI := 1 to nX
+		aMEMTables[_CurrAPos][4][nRecMEM][ aPutValues[nI][1] ] := aPutValues[nI][2]
+	Next
+
+	IF __aConfig[MEMORY_ECHO]
+		conout("PUTVALUES ["+cAlias+"] RECNO ARRAY "+str(nRecMEM,6))
+		varinfo("PUTVALUES",aPutValues)
+		varinfo("RECORD",aMEMTables[_CurrAPos][4][nRecMEM])
+	Endif
+Endif
+Return
+
+// ====================================================================
+STATIC Function MEMClose(cAlias)
+Local nIdxArray := 1
+Local lSetDel , lOk := .t.
+If __aConfig[MEMORY_CHECK]
+	conout(replicate('=',79))
+	conout("CHECK Memory Alias ["+cAlias+"] RECORDS ["+str(len(aMEMTables[_CurrAPos][4]),6)+"] FIELDS ["+str(aMEMTables[_CurrAPos][5],6)+"]")
+	conout(CRLF)
+	// Realiza todos os updates e commits pendentes para verificar o alias
+	dbrunlock()
+	dbunlock()
+	dbcommit()
+	dbskip()
+
+	// Desliga filtro de deletados
+	lSetDel := set(11)
+	SET DELETED OFF
+
+	dbClearFilter()
+	dbclearindex()
+	dbsetorder(0)
+	dbgotop()
+	// Verifica registro a registro
+	While !Eof()
+		IF !FCompare(aMEMTables[_CurrAPos][4][nIdxArray],recno(), aMEMTables[_CurrAPos][5] )
+			lOk := .f.
+		Endif
+		dbskip()
+		nIdxArray++
+	Enddo
+	If !lOk
+		UserException("FAILED TO COMPARE : MEMORY x DATABASE")
+	Endif
+	aDel(aMEMTables,_CurrAPos)
+	asize(aMEMTables,len(aMEMTables)-1)
+	
+	// Re-liga filtro, caso já estivesse ligado
+	If 	lSetDel
+		SET DELETED ON
+	Endif
+	
+	MEMSelectArea()
+	
+Endif
+Return
+
+// ====================================================================
+/*
+			varinfo('Recno',recno())
+			varinfo('RECNO_'+strzero(nRec,6),aLine)
+			varinfo('Fieldget('+str(nI,3)+')',xCpo)
+
+*/
+STATIC Function FCompare(aLine,nRec,nCpos)
+Local nI , lOk := .t. , cEcho := ''
+Local cEchoF := '' , cEchoM := ''
+For nI := 1 to nCpos
+	xCpo := fieldget(nI)
+	If aLine[nI] = NIL
+		If !empty(xCpo)
+			IF lOk
+				cEcho += padc('RECNO DIFFERS ['+str(recno(),10)+'] ARRAY ['+str(nRec,10)+']',79,'-')+CRLF
+			Endif
+			cEchoF += varinfo('Fieldget('+str(nI,3)+')',xCpo,,.f.,.f.)
+			cEchoM += varinfo('Memory',aLine[nI],,.f.,.f.)
+			lOk := .f.
+		Endif
+	ElseIf ! (aLine[nI] == xCpo)
+		IF lOk
+			cEcho += padc('RECNO DIFFERS ['+str(recno(),10)+'] ARRAY ['+str(nRec,10)+']',79,'-')+CRLF
+		Endif
+		cEchoF += varinfo('Fieldget('+str(nI,3)+')',xCpo,,.f.,.f.)
+		cEchoM += varinfo('Memory',aLine[nI],,.f.,.f.)
+		lOk := .f.
+	Endif
+Next
+IF !lOk
+	conout(cEcho+cEchoF+CRLF+cEchoM+replicate('-',79)+CRLF)
+Endif
+Return lOk
+
+// ====================================================================
+STATIC Function MEMPack()
+Local nDataRows
+Local nDeleted
+If __aConfig[MEMORY_CHECK]
+	conout("PACK Alias ["+_CurrAlias+"] RECORDS ["+str(len(aMEMTables[_CurrAPos][4]),6)+"]")
+	nDataRows := len(aMEMTables[_CurrAPos][4])
+	// Procura e elimina registros deletados
+	While (nDeleted := ascan(aMEMTables[_CurrAPos][4] , {|x| x[_COLDeleted] } )) > 0 
+		adel(aMEMTables[_CurrAPos][4],nDeleted)
+		nDataRows--
+	Enddo
+	asize(aMEMTables[_CurrAPos][4],nDataRows)
+Endif
+Return 
+
+STATIC Function MEMDelete(nRecno)
+Return UserException('MEMDelete nao implementado')
+
+STATIC Function MEMRecall(nRecno)
+Return UserException('MEMRecall nao implementado')
+
+// ====================================================================
+STATIC Function MEMSelectArea(cAlias)
+If !empty(cAlias)
+	DbSelectArea(cAlias)
+Endif
+If __aConfig[MEMORY_CHECK]
+	If !empty(cAlias)
+		_CurrAPos := ascan(aMEMTables,{|x| x[2] == cAlias})
+		If _CurrAPos = 0
+			UserException('MEM Alias ['+cAlias+'] not found.')
+		Endif
+		_CurrAlias   := cAlias
+		_CurrMaxCpos := aMEMTables[_CurrAPos][5]
+		_COLRecno    := _CurrMaxCpos+1
+		_COLDeleted  := _CurrMaxCpos+2
+		_CurrLastRec := aMEMTables[_CurrAPos][6]
+		_CurrStru	 := aMEMTables[_CurrAPos][3]
+		SetaliasExcl(cAlias,aMEMTables[_CurrAPos][7])
+	Else
+		_CurrAlias   := ''
+		_CurrMaxCpos := 0
+		_COLRecno    := 0
+		_COLDeleted  := 0
+		_CurrLastRec := 0
+		_CurrStru	 := {}
+	Endif
+Else
+	_CurrAlias   := alias()
+	_CurrMaxCpos := len(dbstruct())
+	_COLRecno    := 0
+	_COLDeleted  := 0
+	_CurrLastRec := lastrec()
+	_CurrStru	 := dbstruct()
+Endif
+Return
+
+// ====================================================================
+STATIC Function MEMChkAlias()
+If __aConfig[MEMORY_CHECK]
+	If !(_CurrAlias  == alias())
+		UserException('Current Alias ['+alias()+'] memory ['+_CurrAlias+'] MISMACH')
+	Endif
+Endif
+Return
+
+
+// ====================================================================
+STATIC Function MEMCloseAll()
+Return UserException("MEMCloseAll nao implementada")
+
+// ====================================================================
+STATIC Function TRABOpen(cAltAlias)
+DEFAULT cAltAlias := "TRB"
+KFileOpen(RDDTEST_TABLE,cAltAlias,.F.)
+MEMSelectArea(cAltAlias)
+Return
+
+
+
+// ====================================================================
+STATIC Function TRABNewIndex()
+Local lExiste,cTopUnq
+
+If __aConfig[USE_BASICINDEX	 ]
+	
+	If __aConfig[USE_RDDTEST] = 'TOPCONN'
+		
+		IF TEST_UNIQUEINDEX
+
+			lExiste := TCCANOPEN(RDDTEST_TABLE,"RDDTEST_UNQ")
+			cTopUnq := TCInternal(13, RDDTEST_TABLE)
+			conout('TCInternal(13 -> ',cTopUnq)
+
+			nRet := TCUNIQUE(RDDTEST_TABLE, "CPOC+CPON+CPOD+CPOL")
+			
+			If nRet != 0
+				UserException(TCSQLERROR())
+			Endif
+
+			cTopUnq := TCInternal(13, RDDTEST_TABLE)
+			conout('TCInternal(13 -> ',cTopUnq)
+  		
+				
+		Endif
+		
+		INDEX ON CPOC to RDDTEST1
+		INDEX ON CPON to RDDTEST2
+		INDEX ON CPOD to RDDTEST3
+		If __aConfig[USE_EXTRAINDEX]
+			INDEX ON CPOC to RDDTEST4
+			INDEX ON CPOC to RDDTEST5
+		Endif
+		
+
+	Else
+		
+		INDEX ON CPOC TAG RDDT1 to (RDDPATH+RDDTEST_TABLE)
+		INDEX ON CPON TAG RDDT2 to (RDDPATH+RDDTEST_TABLE)
+		INDEX ON CPOD TAG RDDT3 to (RDDPATH+RDDTEST_TABLE)
+		
+		If __aConfig[USE_EXTRAINDEX]
+			INDEX ON CPOC TO (RDDPATH+'rw'+'_idx.idx')
+			INDEX ON CPOC TO (RDDPATH+'rw'+'_opx.opx')
+		Endif
+
+	Endif
+
+Endif
+
+Return
+
+// =======================================================================
+STATIC Function TRABSetIndex()
+Local lExiste,cTopUnq
+
+If __aConfig[USE_BASICINDEX	 ]
+	
+	If __aConfig[USE_RDDTEST] = 'TOPCONN'
+
+		lExiste := TCCANOPEN(RDDTEST_TABLE,"RDDTEST_UNQ")
+		cTopUnq := TCInternal(13, RDDTEST_TABLE)
+
+		DbSetIndex('RDDTEST1')
+		DbSetIndex('RDDTEST2')
+		DbSetIndex('RDDTEST3')
+		If __aConfig[USE_EXTRAINDEX]
+			DbSetIndex('RDDTEST4')
+			DbSetIndex('RDDTEST5')
+		Endif
+		ShowOP('',"DbSetIndex('RDDTEST1...5')")
+	Else
+		DbSetIndex(RDDPATH+'rddtest.cdx')
+/*
+		OrdListAdd(RDDPATH+RDDTEST_TABLE,'RDDT1')
+		OrdListAdd(RDDPATH+RDDTEST_TABLE,'RDDT2')
+		OrdListAdd(RDDPATH+RDDTEST_TABLE,'RDDT3')
+*/
+		If __aConfig[USE_EXTRAINDEX]
+			DbSetIndex(RDDPATH+'rw'+'_idx.idx')
+			DbSetIndex(RDDPATH+'rw'+'_opx.opx')
+		Endif
+		ShowOP('',"OrdListAdd(RDDPATH+RDDTEST_TABLE,'RDDT1')")
+		ShowOP('',"OrdListAdd(RDDPATH+RDDTEST_TABLE,'RDDT2')")
+		ShowOP('',"OrdListAdd(RDDPATH+RDDTEST_TABLE,'RDDT3')")
+	Endif
+	
+Endif
+
+Return
+
+
+STATIC Function LoadSequence()
+Local aOp := {}
+
+
+/*
+
+Sequencia que explode o AS400
+
+AAdd(aOp,27)
+AAdd(aOp,03) 
+AAdd(aOp,09) 
+AAdd(aOp,48) 
+AAdd(aOp,26) 
+AAdd(aOp,28) 
+AAdd(aOp,03) 
+AAdd(aOp,05) 
+AAdd(aOp,09) 
+AAdd(aOp,10) 
+
+Definicoes
+
+#DEFINE SHOW_RLOCK_FAILED	.F.
+#DEFINE TEST_APPEND			.F.
+#DEFINE TEST_REPLACE		.F.
+#DEFINE TEST_GOTOP			.T.
+#DEFINE TEST_DBSEEK			.T.	
+#DEFINE TEST_SOFTSEEK		.T. 
+#DEFINE TEST_GOTOREC		.T.
+#DEFINE TEST_DBSKIP			.T.
+#DEFINE TEST_DBCOMMIT		.T.
+#DEFINE TEST_VERIFYENV		.T.
+#DEFINE TEST_DBGOBOTTOM 	.T.
+#DEFINE TEST_SETTRIGGER		.F.
+#DEFINE REPLACE_ALLFIELDS	.F.
+#DEFINE TEST_TCSQLEXEC		.F.
+#DEFINE DELETE_TOPFIELD		.F.
+#DEFINE TEST_UNIQUEINDEX	.F.
+#DEFINE TEST_TCSETPARAM 	.F.
+#DEFINE TEST_TCINTERNAL 	.F.	
+#DEFINE SQLFILTER_TYPE 		2		// 0 = Random ! / 1 Sql Only / 2 isam nativo only
+#DEFINE TEST_QUERYES		.F.
+#DEFINE USE_EXTRA_ALIAS		.F.	
+#DEFINE USE_INDEX1			.T.
+#DEFINE USE_INDEX2			.T.
+#DEFINE USE_INDEX3			.T.
+#DEFINE TEST_CLEARFILTER	.T.
+
+*/
+
+Return aOp
+
+// Cria e/ou abre superfile
+STATIC Function FSuperNew()
+Local nErr , nReg
+Local _cSource	:= GetSystemLoadDir() + 'HLPPOR.TXT'
+Local aDir 		:= Directory(_cSource)
+
+CreateHlp(SPF_RDDTEST,_cSource,aDir[1,2],.T.)	// criacao de um arquivo SPF para os testes
+
+If !file(SPF_RDDTEST)
+	nErr := SPF_CANOPEN(SPF_RDDTEST)
+	If nErr < 0
+		nReg 	:= SPF_INSERT(SPF_RDDTEST, '','','','')
+		If nReg < 0
+			UserException('SPF_INSERT ['+SPF_RDDTEST+'] Error ('+str(nReg,4)+')')
+		Endif
+	Endif
+Endif
+Return
+
+
+STATIC Function FSuperClose()
+Local nErr
+nErr := SPF_CLOSE(SPF_RDDTEST)
+Return
+
+
+// ==============================================================
+User Function EatFiles(nRdd,aCfg)
+Local nI
+Local cAlias
+Local cArq
+Local aCampos
+Local cTimer
+Local aFiles := {}
+Local nCpos
+Local nC , nR
+Local nTotFiles
+
+IF USEERRORBLOCK
+	ErrorBlock({|e| RDDError(e) })
+Endif
+
+__aConfig := aCfg
+
+FSuperNew()
+
+IF EAT_CREATE
+	
+	If __aConfig[USE_RDDTEST] == 'TOPCONN'
+		TSTTopInit()
+    Endif
+    
+	ShowOp('[EATFILES] Start CREATE '+time())
+	
+	For nI := 1 to EAT_MAXFILES
+		
+		cArq 		:= NewTable()
+		aCampos 	:= GetKStruct(.T.)
+		nCpos 		:= len(aCampos)
+		TEMPCreate(cArq,aCampos)
+		TEMPOpen(cArq,.T.)
+		TEMPNewIndex()
+		TEMPSetIndex()
+		
+		ShowOp("ADD Register "+alias())
+		
+		For nR := 1 to 2
+			dbappend(.T.)
+			For nC := 1 to nCpos
+				FieldPut(nC,xValue(aCampos[nC][2],aCampos[nC][3],aCampos[nC][4]))
+			Next
+			dbskip()
+		Next
+		
+		ShowOp("Close Table "+alias())
+		
+		dbcommit()
+		dbclosearea()
+		
+		aadd(aFiles,cArq)
+		
+		IF RDDBreak()
+			EXIT
+		Endif
+		
+	Next
+	
+Else // Already open
+	
+	ShowOp(padc(" Start DIRECTORY ",60,'='))
+
+	aFilesDisk := directory(RDDPATH+'t*.dtc')
+	
+	nTotFiles := len(aFilesDisk)
+
+	conout('Identificados ['+str(nTotFiles,6)+'] arquivos no diretório.')
+
+	IF nTotFiles < EAT_MAXFILES
+		UserException("Qtd de arquivos insuficiente para teste.")
+	Endif
+
+	While len(aFiles) < EAT_MAXFILES
+
+		cFile := filenoext(aFilesDisk[randomize(1,nTotFiles+1)][1])
+		If ascan(aFiles , {|x| x == cFile }) = 0 
+			aadd(aFiles,cFile)
+		Endif
+	
+	Enddo
+	
+Endif
+
+ShowOp(padc(" Start OPEN ",60,'='))
+
+For nI := 1 to EAT_MAXFILES
+	
+	// Selecciona a tabela
+	__TempFile := aFiles[nI]
+	
+	// Abre em modo compartilhado
+	TEMPOpen(__TempFile,.F.)
+                                                         
+	IF !TEMPSetIndex()
+		TEMPNewIndex()
+		TEMPSetIndex()
+	Endif
+
+	dbgotop()
+	
+	aCampos := dbstruct()
+	
+	ShowOp("Lock recno "+str(recno(),10))
+	if dbrlock(recno())
+		nC := randomize(1,len(aCampos)+1)
+		FieldPut(nC,xValue(aCampos[nC][2],aCampos[nC][3],aCampos[nC][4]))
+		dbskip()
+	Endif
+	
+	IF RDDBreak()
+		EXIT
+	Endif
+	
+Next
+
+ShowOp(padc(" Start BAGUNÇA ",60,'='))
+
+While !RDDBreak()
+	
+	nI := randomize(1,EAT_MAXFILES+1)
+	
+	// Seleciona a tabela
+	__TempFile := aFiles[nI]
+	
+	ShowOp("BAGUNÇA - Close & reopen "+__TempFile)
+	
+	// destrava registro e fecha tabela
+	dbselectarea(__TempFile)
+	dbrunlock(recno())
+	dbclosearea()
+	
+	// reabre e loca outro registro
+	TEMPOpen(aFiles[nI],.F.)
+	TEMPSetIndex()
+	aCampos := dbstruct()
+	IF bof() .and. eof()
+		For nR := 1 to 3
+			dbappend(.f.)
+			For nC := 1 to len(aCampos)
+				FieldPut(nC,xValue(aCampos[nC][2],aCampos[nC][3],aCampos[nC][4]))
+			Next
+			dbrunlock(recno())
+			dbskip()
+		next
+	Endif
+	dbgotop()
+	If dbrlock(recno())
+		nC := randomize(1,len(aCampos)+1)
+		FieldPut(nC,xValue(aCampos[nC][2],aCampos[nC][3],aCampos[nC][4]))
+		dbskip()
+	Endif
+	
+Enddo
+
+Return
+
+// Limpa todos os indices das tabelas do disco, etc...
+User Function FreeCDX()
+Local nI
+Local aFilesDisk
+Local nTotFiles
+
+aFilesDisk := directory(RDDPATH+'t*.dtc')
+
+nTotFiles := len(aFilesDisk)
+
+For nI := 1 to nTotFiles
+	
+	__TempFile := filenoext(aFilesDisk[nI][1])
+	
+	conout("Limpando & reindexando ["+__TempFile+"] ("+str(ni,4)+'/'+str(nTotFiles,4)+")")
+	
+	TEMPOpen(__TempFile,.T.)
+	CTreeDelIdx()
+	USE
+	TEMPOpen(__TempFile,.T.)
+	TEMPNewIndex()
+	USE
+	
+Next
+
+Return
+
+// ==============================================================
+Static Function EatJobs(nRdd,aCfg)
+Local nI
+Local cAlias
+Local cArq
+Local aCampos
+Local cTimer
+Local aFiles := {}
+Local nCpos
+Local nC , nR
+Local nTotFiles
+
+IF USEERRORBLOCK
+	ErrorBlock({|e| RDDError(e) })
+EndIf 
+
+__aConfig := aCfg
+
+rpcsettype(3)
+Rpcsetenv('99','01')
+
+FSuperNew()
+
+cArq 		:= NewTable()
+aCampos 	:= GetKStruct(.T.)
+nCpos 		:= len(aCampos)
+TEMPCreate(cArq,aCampos)
+TEMPOpen(cArq,.T.)
+TEMPNewIndex()
+TEMPSetIndex()
+
+dbappend(.T.)
+For nC := 1 to nCpos
+	FieldPut(nC,xValue(aCampos[nC][2],aCampos[nC][3],aCampos[nC][4]))
+Next
+dbskip()
+
+If !killapp()
+	Startjob('EatJobs',getenvserver(),.f.,nRdd,aCfg)
+	__Quit()
+Endif
+
+Return conout('[EATJOBS BREAK]')
+
+
+
+STATIC Function isTrbAlias()
+Return Alias()$"TRB,TRX"
+
+
+STATIC Function IsRLocked(nReg)
+Local cAlias := alias()
+Return (ascan(aLocks,{|x| x[1] == cAlias .and. x[2] == nReg })) > 0 
+
+STATIC Function FreeALLLocks()
+asize(aLocks,0)
+Return
+
+STATIC Function FreeLocks()
+Local cAlias := alias()
+While (nPos := ascan(aLocks,{|x| x[1] == cAlias }) ) > 0 
+	adel(aLocks,nPos)
+	asize(aLocks,len(aLocks)-1)
+Enddo
+Return
+
+
+STATIC Function AddRLock(nReg)
+Local cAlias := alias()
+Local aList1 , aList2
+If  (ascan(aLocks,{|x| x[1] == cAlias .and. x[2] == nReg })) = 0 
+	aadd(aLocks,{cAlias,nReg})
+	aList1 := DbrLockList()
+	aList2 := {}
+	aeval(aLocks,{|x| IIF( x[1] == cAlias , AADD(aList2,x[2]) ,  NIL) })
+	if len(aList1) <> len(aList2)
+		varinfo('ListTOP',aList1)
+		varinfo('ListMEM',aList2)
+		UserException("LOCK LIST FAILED")
+	Endif
+Endif
+Return
+
+
+// Retorna .T. se tem algum lock no alias atual
+STATIC Function HasanyLock()
+Local cAlias := alias()
+Return  ascan(aLocks,{|x| x[1] == cAlias }) > 0 
+
+// Retorna registro aleatorio já bloqueado no alias 
+STATIC Function GetRLock()
+Local cAlias := alias()
+Local aTmp := {} // Isola locks do alias
+Local nTmp
+aeval( aLocks ,{|x| iif(x[1] == cAlias, aadd(aTmp,x[2]) ,NIL) } )
+nTmp := len(aTmp)
+If nTmp=0
+	UserException("NO LOcks in ["+alias()+"] to get.")
+Endif
+Return aTmp[Randomize(1,nTmp+1)]
+
+// Tira o lock do registro 
+STATIC Function SetRUnlock(nReg)
+Local cAlias := alias()
+Local nPos 
+If  (nPos  := ascan(aLocks,{|x| x[1] == cAlias .and. x[2] == nReg })) > 0 
+	adel(aLocks,nPos)
+	asize(aLocks,len(aLocks)-1)
+Else
+	UserException('Unlock Invalid record ['+str(nReg,6)+'] in alias ['+alias()+']')
+Endif
+Return
+
+
+STATIC Function SetaliasExcl(cAlias,lExclusive)
+Local nPos := ascan(__AliasMode,{|x| x[1] == cAlias})
+If nPos=0
+	aadd(__AliasMode,{calias,lExclusive})
+Else
+	__AliasMode[nPos][2] := lExclusive
+Endif
+Return
+
+
+STATIC Function IsAliasExcl()
+Local nPos := ascan(__AliasMode,{|x| x[1] == alias()})
+If nPos=0
+	return .F.
+Endif
+Return __AliasMode[nPos][2]
+
+
+
+/* ==============================================================
+		FUNCOES PARA ABRIR VARIAS THREADS COM SUPERFILE
+============================================================== */
+Static Function EATSPF(nRdd,aCfg)
+Local nI
+For nI := 1 to 70 
+	startjob('U_OPENSPF',getenvserver(),.f.,'SpfOpen ['+str(nI,2)+']',nRdd,aCfg)
+	sleep(100)
+Next
+Return
+
+Static Function OPENSPF(cMsg,nRdd,aCfg)
+__aConfig := aCfg
+conout("[IN] "+cMsg)
+spf_canopen('sigapss.spf')
+conout("[OK] "+cMsg)
+while !RDDBreak()
+	sleep(1500)
+enddo
+conout("[OUT] "+cMsg)
+Return
+
+// Teste de Leitura , Seek , Lock e Update dos SXS da empresa 99 
+
+Static Function MMRead()
+Local aSXRead := {}  
+
+If !MsgNoYes("Teste de Performance de Dicionários"+CRLF+CRLF+;
+			"*** ATENCAO ***"+CRLF+;
+			"Este programa vai danificar os SXS da empresa 01."+CRLF+CRLF+;
+			"Deseja prosseguir mesmo assim ? ")
+	Return
+Endif
+
+rpcsetenv('01','01')
+
+aadd(aSXRead,'SIX')
+aadd(aSXRead,'SX1')
+aadd(aSXRead,'SX2')
+aadd(aSXRead,'SX3')
+aadd(aSXRead,'SX6')
+aadd(aSXRead,'SX7')
+aadd(aSXRead,'SXA')
+aadd(aSXRead,'SXB')
+
+MsgRun("Teste de Dicionários","Aguarde ... ",{|| DoTest(aSXRead) } )
+
+Return
+
+
+
+
+
+Static Function FSuperMisc()
+Local nErr,nReg
+nErr := SPF_CANOPEN(SPF_RDDTEST)
+If nErr < 0
+	nReg 	:= SPF_INSERT(SPF_RDDTEST, '','','','')
+	If nReg < 0
+		UserException('SPF_INSERT ['+SPF_RDDTEST+'] Error ('+str(nReg,4)+')')
+	Endif
+Endif
+nErr := SPF_CANOPEN(SPF_RDDTEST)
+If nErr < 0
+	UserException('My Superfile Error '+str(nErr,4))
+Endif
+Return
+
+static function TConout(cMsg)
+Return conout("Thread ["+str(ThreadID(),10,0)+"] "+alltochar(cMsg))
+
+
+
+// ================================================================================================
+// ================================================================================================
+// ================================================================================================
+
+User Function MMJob(lOnRpc)
+Local nI , nTR := 64384
+Local nMaxThreads := 10
+Local nX
+
+DEFAULT lOnRpc := .f.
+
+rpcsetenv('01','01')
+
+// Limpa semaforos globais
+PutGlbValue("__START__","")
+For nX := 1 to nMaxThreads
+	Putglbvalue("JOB_"+strzero(nX,2),"")
+Next
+
+For nI := 1 to nMaxThreads
+	
+	If killapp()
+		__QUIT()
+	Endif
+
+	conout(padr("RDD Read Stress ["+str(nI,2)+"] USER(s) ",79,'-'))
+
+	startjob('U_JRead',getenvserver(),.f.,nI)
+	ptinternal(1,"Wait for Job Start ["+"JOB_"+strzero(nI,2)+"]")
+	While empty(getglbvalue("JOB_"+strzero(nI,2)))
+		sleep(100)
+	Enddo
+
+	If lOnRpc
+		ptinternal(1,"Wait for RPC Sync Start")
+		while !ipcwaitex('_IPC_START_',5000)
+			If killapp()
+				__QUIT()
+			Endif
+		enddo		
+	Endif
+	
+	conout("["+time()+"] START")
+	PutGlbValue("__START__","*")
+
+	nTotTimer := seconds()
+
+	ptinternal(1,"Wait for End Of Jobs")
+
+	lEndAll := .F.
+	While !lEndAll
+		sleep(100)
+		lEndAll := .T.
+		For nX := 1 to nI
+			IF !empty(getglbvalue("JOB_"+strzero(nX,2)))
+				lEndAll := .f.
+			Endif
+		Next
+	Enddo
+	
+	PtInternal(1,"Set Global End")
+	PutGlbValue("__START__","")
+
+	nTotRead := nTR*nI
+	nTotTimer := seconds()-nTotTimer
+	conout("["+time()+"] END ["+str(nTotTimer,12,3)+"] READ ["+str(nTotRead,12)+"] RPS ["+str(nTotRead/nTotTimer,12,4)+"] ")
+	conout(replicate('-',79))
+	conout('')
+Next
+
+Return
+
+
+Static Function U_JRead(nI)
+Local aSXRead := {}  
+
+If killapp()
+	__QUIT()
+Endif
+
+TConout("Start")
+
+If killapp()
+	__QUIT()
+Endif
+
+rpcsetenv('01','01')
+
+aadd(aSXRead,'SIX')
+aadd(aSXRead,'SX1')
+aadd(aSXRead,'SX2')
+aadd(aSXRead,'SX3')
+aadd(aSXRead,'SX6')
+aadd(aSXRead,'SX7')
+aadd(aSXRead,'SXA')
+aadd(aSXRead,'SXB')
+
+TConout("Ready")
+
+while !killapp()
+	
+	putglbvalue("JOB_"+strzero(nI,2),"*")
+	
+	ptinternal(1,"Wait for Global Start")
+	while empty(GetGlbValue("__START__"))
+		sleep(100)
+		If killapp()
+			__QUIT()
+		Endif
+	enddo
+	
+	ptinternal(1,"Running")
+	DoTest(aSXRead)
+	
+	putglbvalue("JOB_"+strzero(nI,2),"")
+	
+	ptinternal(1,"Wait for Global End")
+	while !empty(GetGlbValue("__START__"))
+		sleep(100)
+		If killapp()
+			__QUIT()
+		Endif
+	enddo
+
+enddo
+
+Return
+
+#DEFINE MM_DOREAD	.T.
+#DEFINE MM_DOSEEK	.F.
+#DEFINE MM_DOLOCK	.F.
+#DEFINE MM_DOUPDATE .F.
+
+Static Function DoTest(aSXRead)
+Local nI , nJ , nT , nTotal
+Local nS , nLast , nSeek, nRead , nLock , nUpdate
+Local aSeekInfo := {}
+Local nTotalRec := 0
+
+nT := len(aSXRead)
+For nI := 1 to nT
+	If killapp()
+		__QUIT()
+	Endif
+	dbselectarea(aSXRead[ni])
+	nLast :=  lastrec()
+	// conout('Alias ['+aSXRead[nI]+'] LastRec ['+strzero(nLast,8)+']')
+	IF MM_DOSEEK
+		aadd(aSeekInfo,{})
+		Do while !eof()
+			aadd(aSeekInfo[nI],&(indexkey()))
+			dbskip(50)
+		Enddo
+	Endif
+	nTotalRec += nLast
+Next
+
+If MM_DOREAD
+	nRead := 0
+	nTotal := seconds()
+	For nI := 1 to nT
+		dbselectarea(aSXRead[ni])
+		dbgotop()
+		While !eof()
+			nRead++
+			dbskip()
+		Enddo
+	Next
+	nTotal := seconds()-nTotal
+	Tconout('Timer ['+str(nTotal,12,4)+'] OP ['+str(nRead,12,4)+'] RPS ['+str((nRead / nTotal),12,4)+']')
+Endif
+
+If MM_DOSEEK
+	nTotal := seconds()
+	nSeek := 0
+	For nS := 1 to 50
+		For nI := 1 to nT
+			aeval(aSeekInfo[nI],{|x| (aSXRead[ni])->(DbSeek(x)) })
+		Next
+	Next
+	nSeek += (50*len(aSeekInfo[nI]))
+	nTotal := seconds()-nTotal
+	Tconout('SEEK Timer ['+str(nTotal,12,4)+'] RPS ['+str((nSeek / nTotal),12,4)+']')
+Endif
+
+If MM_DOLOCK
+	nTotal := seconds()
+	nLock := 0
+	For nI := 1 to nT
+		dbselectarea(aSXRead[ni])
+		While !eof()
+			dbrlock(recno())
+			dbrunlock(recno())
+			nLock++
+			dbskip()
+		Enddo
+	Next
+	nTotal := seconds()-nTotal
+	Tconout('LOCK Timer ['+str(nTotal,12,4)+'] RPS ['+str((nLock / nTotal),12,4)+']')
+Endif
+
+If MM_DOUPDATE
+	nTotal := seconds()
+	nUpdate := 0
+	For nI := 1 to nT
+		dbselectarea(aSXRead[ni])
+		nLastCpo := fCount()
+		While !eof()
+			dbrlock(recno())
+			fieldput(nLastCpo,chr(randomize(65,91))+chr(randomize(65,91)))
+			dbrunlock(recno())
+			nUpdate++
+			dbskip()
+		Enddo
+	Next
+	nTotal := seconds()-nTotal
+	conout('UPD  Timer ['+str(nTotal,12,4)+'] RPS ['+str((nUpdate / nTotal),12,4)+']')
+Endif
+
+// RpcClearEnv()
+
+Return
+
+
+User Function MMRPCJob()
+Local aRPCservers := {}
+Local aRpcConn := {}
+Local nS
+
+aadd(aRPCservers,{"tec-automan",5710,getenvserver()})
+aadd(aRPCservers,{"sandra",5710,getenvserver()})
+
+aRpcConn := array(len(aRPCservers))
+
+For nS := 1 to len(aRPCservers)
+	
+	cRpcServer := aRPCservers[nS][1]
+	nRpcPort := aRPCservers[nS][2]
+	cRpcEnv := aRPCservers[nS][3]
+
+	varinfo('RPC',aRPCservers[nS])
+	
+	CREATE RPCCONN aRpcConn[nS]	ON ;
+		SERVER cRpcServer ;
+		PORT nRpcPort ;
+		ENVIRONMENT cRpcEnv ;
+		EMPRESA "01" ;
+		FILIAL "01" ; 
+		CLEAN
+	
+	If aRpcConn[nS] = NIL
+
+		cMsgEcho := "Falha de conexão - RPC - "+;
+			"Server ["+cRpcServer+"] "+;
+			"Port ["+str(nRpcPort,4)+"] "+;
+			"Env ["+cRpcEnv+"]"
+		UserException(cMsgEcho)
+		
+	Endif
+	
+	// Inicializa o ambiente na thread RPC
+	aRpcConn[nS]:Callproc('conout','Inicializando Ambiente ')
+
+Next
+
+For nS := 1 to len(aRPCservers)
+
+	aRpcConn[nS]:Callproc('startjob','U_MMJob',getenvserver(),.F.,.T.)
+	sleep(250)
+	
+Next
+
+lAllOk := .f.
+
+While !Killapp()
+
+	PtInternal(1,"Wait 4 RPC Ready")
+
+	lAllOk := .t.
+
+	For nS := 1 to len(aRPCservers)
+		nOk := aRpcConn[nS]:Callproc('ipccount','_IPC_START_')
+		IF nOk <= 0 
+			lAllOk := .f.
+		Endif		
+	Next
+	
+	If lAllOk
+		Conout("Start Pulse ... ")
+		For nS := 1 to len(aRPCservers)
+			aRpcConn[nS]:Callproc('ipcgo','_IPC_START_')
+		Next
+	Endif
+	
+	sleep(250)	
+	
+Enddo	
+
+Return
+	
+
+Static Function RTrigger(cCpo,nOper,cDescr)
+//conout('Trigger CALLED ['+alias()+'] ['+cCpo+'] ['+str(nOper,3)+'] ['+cDescr+']')
+Return 
+
+
+
+STATIC Function GetDBID()
+Local cQuery , cId
+If __TopDB == NIL
+	__TopDB := upper(tcgetdb())
+Endif
+If "DB2"$__TopDB .and. !"400"$__TopDB
+	cQuery := "select application_id() AS SESSION from sysibm.sysdummy1"
+ElseIf "SQL"$__TopDB
+	cQuery := "select @@SPID AS SESSION"
+Endif
+If !empty(cQuery)
+	If "400"$TcGetDb()		
+		cQuery += " FOR READ ONLY"
+	Endif
+	DbUseArea(.T., 'TOPCONN', TcGenQry(,,cQuery), 'QRYTMP', .T., .T.)
+	cId := QRYTMP->SESSION
+	QRYTMP->(DbCloseArea())
+	Return cId
+Else
+	conout("["+str(ThreadId(),12)+"] WARNING : DB THREAD ID NOT SUPPORTED FOR ["+__TopDB+"]")
+Endif
+Return '(dummy)'
+
+
+/* -----------------------------------------------------------------------
+Funcao		FindThread(aFnName,aEnv)
+Autor			Julio Wittwer
+Data			01/10/2001
+Descricao	Retorna Array com dados das Threads das funcioes solicitadas
+Parametros	aFnName = Array com as funcoes a serem pesquisadas , ou String 
+				com funcoes separadas por vírgula.
+				aEnv = Array com os ambientes a serem pesquisados , ou String 
+				com ambientes separados por vírgula. (Default=Ambiente atual) 
+----------------------------------------------------------------------- */
+Static Function FindThread(aFnName,aEnv)
+Local aRet 		:= {} , aIn , nI
+DEFAULT aEnv := { GetEnvServer() }
+If valtype(aFnName)="C"
+	aFnName := Separa(Upper(aFnName),",",.F.)
+Endif
+If valtype(aEnv)="C"
+	aEnv := Separa(Upper(aEnv),",",.F.)
+Endif
+aIn 		:= GetUserInfoArray()
+// varinfo("aIn",aIn)
+For nI := 1 to len(aIn)
+	If ascan(aFnName , {|x| x == alltrim(Upper(aIn[nI][5])) }) > 0
+		IF aEnv[1] = "*" .OR. ascan(aEnv , {|x| x = upper(aIn[nI][6]) } ) > 0
+			aadd(aRet , aclone(aIn[nI]) )
+		Endif
+	Endif
+Next
+Return aRet
+
+
+Static Function Separa(cTexto, cSeparador,lPodeNulo)
+Local nPosicao,cPegou
+Local aRetorno:= {}
+Local lFimSep:= .F.
+DEFAULT cSeparador := ","
+DEFAULT lPodeNulo  := .T.
+If len(cSeparador)=1 .and. !lPodeNulo
+	Return strtokarr(cTexto,cSeparador)
+Else
+	While (Len(cTexto) != 0)
+		If (nPosicao:= At(cSeparador, cTexto)) == 0
+			nPosicao:= Len(cTexto)
+		EndIf
+		If (SubStr(cTexto, nPosicao, len(cSeparador)) == cSeparador)
+			lFimSep:= .T.
+			cPegou:=SubStr(cTexto, 1, nPosicao - 1)
+		Else
+			lFimSep:= .F.
+			cPegou:=SubStr(cTexto, 1, nPosicao)
+		EndIf
+		If !empty(cPegou) .or. lPodeNulo
+			AAdd(aRetorno, cPegou)
+		EndIf
+		cTexto:= SubStr(cTexto, nPosicao + len(cSeparador))
+	EndDo
+	If (lFimSep) .and. lPodeNulo
+		AAdd(aRetorno, "")
+	EndIf
+Endif
+Return aRetorno
+
+
+User Function JCria()
+Local nI
+	For nI := 1 to 10 
+		Startjob("U_QCRIA",getenvserver(),.f.)
+	Next
+Return
+
+User Function QCria()
+Local nI , aAlias := {} , nT
+conout("["+str(ThreadId(),12)+"] Thread IN")
+rpcsetenv("01","01")
+dbselectarea("SX2")
+dbsetorder(1)
+dbseek("SA1")
+for ni := 1 to 200
+	cAlias := sx2->x2_chave
+	IF !cAlias$"_SAR_SB7_SBU"
+		aadd(aAlias,cAlias)
+	Endif
+	sx2->(DbSkip())
+Next
+nT := len(aAlias)
+While !killapp()
+	conout("["+str(ThreadId(),12)+"] Thread OPEN")
+	for ni := 1 to nT
+		chkfile(aAlias[nI])
+	Next
+	conout("["+str(ThreadId(),12)+"] Thread TOP/BOTTOM")
+	for ni := 1 to nT
+		(aAlias[nI])->(DbGoTop())
+		(aAlias[nI])->(DbGoBottom())
+		(aAlias[nI])->(DbGoTop())
+	Next
+	conout("["+str(ThreadId(),12)+"] Thread CLOSE")
+	aeval(aAlias,{|x| (x)->(DbCloseArea()) })
+Enddo
+conout("["+str(ThreadId(),12)+"] Thread END")
+Return
+
+/* ---------------------------------------------------------------------------
+Teste de Funcoes do TOP - TcInternal 
+TcInternal 3 = removido 
+TcInternal 5 = ??? verificar 
+--------------------------------------------------------------------------- */
+Static Function TCTestInt()
+Local aTest := {1,2,6,7,8,10,11,12,13,53,99}
+Local xRet , cParam := "" , nTest
+
+nTest := randomize(1,len(aTest)+1)
+
+If aTest[nTest] = 1
+	// Seta comentario da Thread
+	If FORCE_MONITOR_KBUM
+		cParam += xValue("C",1023,0)
+		xRet := TcInternal(1,cParam)
+	Else
+		cParam += xValue("C",128,0)
+		xRet := TcInternal(1,cParam)
+	Endif
+ElseIf aTest[nTest] = 2
+	// Recupera usuario / senha da conexao
+	xRet := TcInternal(2)
+	if empty(xRet)
+		UserException("TCINTERNAL 2 FAILED : RETURNS EMPTY")
+	Endif
+ElseIf aTest[nTest] = 6
+	// Recupera ThreadId do TOP
+	xRet := TcInternal(6)
+	if empty(xRet)
+		UserException("TCINTERNAL 6 FAILED : RETURNS EMPTY")
+	Endif
+ElseIf aTest[nTest] = 7
+	// Recupera Numero de Usuarios conectados no TOP - OK
+	xRet := TcInternal(7)
+	If val(xRet)=0
+		UserException("TCINTERNAL 7 FAILED ["+xRet+"]")
+	Endif
+	
+ElseIf aTest[nTest] = 8
+	// Seta Usuario do TOP para o Monitor
+	cParam := "RDDSTRESS_"+alltrim(str(ThreadId(),10))
+//	TcInternal(8,cParam)
+
+ElseIf aTest[nTest] = 10
+
+/*
+		### REMOVIDO ###
+	// VFerifica integridade referencial
+	cParam := RDDTEST_TABLE
+	xRet := TcInternal(aTest[nTest],cParam)
+
+*/
+
+ElseIf aTest[nTest] = 11
+	// License Mode 
+	// M = Microsiga 
+	// N = No License
+	// U = User License
+	// P = Processor License
+	// E = Unlimited
+	xRet := TcInternal(11)
+	IF !xRet$"MNUPE"
+		UserException("TCINTERNAL 11 FAILED : RETURNS ["+xRet+"]")
+	Endif
+ElseIf aTest[nTest] = 12 // Set Use FK ("ON")
+	If randomize(1,3)==2
+		cParam := "OFF"
+	Else
+		cParam := "ON"
+	Endif
+	xRet := TcInternal(12,cParam)
+ElseIf aTest[nTest] = 13 // Recuepra chave unica para a tabela 
+	cParam := RDDTEST_TABLE
+	xRet := TcInternal(13,cParam)
+//	varinfo("xRet_UNQ",xRet)
+/*
+
+Utilizar TCIsvLock, tcvlock e tcvunlock
+
+
+ElseIf aTest[nTest] = 51 // Virtual Lock 
+	cParam := str(randomize(1,10),1)
+	xRet := TcInternal(aTest[nTest],cParam)
+ElseIf aTest[nTest] = 52 // Virtual UNLock 
+	cParam := str(randomize(1,10),1)
+	xRet := TcInternal(aTest[nTest],cParam)
+*/
+ElseIf aTest[nTest] = 53 
+
+	// Lock Owner Info
+	// Alimentado quando um dbrlock falha ! 
+	// Apos builsd atualizado volta a funcionar  !!!
+	xRet := TcInternal(53)
+
+ElseIf aTest[nTest] = 60 // Drop Index (cparam)
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 61 // Recno Accept Null (table) 
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 62 // DropTrigger (table)
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 63 // Force Clear  ? ? ? 
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 69 // Drop Indexes (cparam)
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 70 // Is Index Reverse ( cparam ) 
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 98 // Unlock total da Thread ??? 
+	cParam := "NONONO"
+ElseIf aTest[nTest] = 99 // Virtual Lock Engine Info
+	xRet := TcInternal(aTest[nTest],cParam)
+Else
+	UserException("NAO TRATADO")
+Endif
+//varinfo("TcInternal("+str(aTest[nTest],2)+",'"+cParam+"')",xRet)
+Return
+
+
+/*
+
+TCInternal = Uso no ERP 
+
+5
+8
+12
+13
+53
+60
+61
+*/
+
+
+// Retorna campos aleatorios para o Mapa
+// Pode retornar mais de uma vez o mesmo campo
+Static Function GetRandmap()
+Local aStru := dbstruct()
+Local nI , nT := len(aStru), nC , nX
+Local cRet := ''
+nX := randomize(1,(nT*2))
+For nI := 1 to nX
+	nC := randomize(1,nT+1)
+	cRet += alltrim(aStru[nC][1])
+	if nI <> nT
+		cRet += ','
+	Endif
+Next
+/*
+If randomize(1,10)==2
+    nPos := randomize(1,len(cRet)+1)
+	cRet := left(cRet,nPos-1)+substr(cRet,nPos)
+	conout("*** ZUANDO MAPA ***")
+Endif
+*/
+Return cRet
+
+
+/*
+Teste para metralhar virtual lock no topconnect
+*/
+
+STATIC Function TOPTSTLOCK()
+Local cLockValue := strzero(randomize(1,VLOCK_MAXLIST),4)
+
+If __USEVLOCK  == NIL 
+	__USEVLOCK := TCIsvLock()
+Endif
+
+If __USEVLOCK
+
+	If len(__LISTVLOCK) < VLOCK_MINLIST
+		If tcvlock(cLockValue)
+			IF VLOCK_ECHO
+				conout(str(ThreadId(),10)+" VLOCK ADD ["+cLockValue+"]")
+			Endif
+			aadd(__LISTVLOCK,cLockValue)
+		Else
+			if VLOCK_ECHO
+				cOwner := tcinternal(54)
+				conout(str(ThreadId(),10)+" VLOCK FAILED ["+cLockValue+"] OWNER ["+cOwner+"]")
+			Endif
+		Endif
+	Else
+		If VLOCK_ECHO
+			conout(str(ThreadId(),10)+" VLOCK UNLOCKALL")
+		Endif
+		IF !tcvunlock()
+			varinfo("VLOCKS",__LISTVLOCK)
+			UserException("TCVUNLOCK FAILED")
+		Endif
+		__LISTVLOCK := {}
+    Endif
+   
+Endif
+
+Return 
+
+Static Function TOPTSTEXEC()
+Local nOpc := randomize(1,4)
+Local cExec , nC , xRet
+
+IF nOpc == 1
+
+//	xRet := TcRefresh(RDDTEST_TABLE)
+//	varinfo('TCRefresh',xRet)
+
+ElseIF nOpc == 2
+
+	ShowOP('OP TCSqlExec (UPDATE) ')
+
+	cExec := "UPDATE RDDTEST SET "
+	
+	For nC := 1 to _CurrMaxCpos
+		If nC>1
+			cExec += ', '
+		Endif
+		xVal 	:= xValue(_CurrStru[nC][2],_CurrStru[nC][3],_CurrStru[nC][4])
+		cExec += _CurrStru[nC][1]+" = "
+		If _CurrStru[nC][2]=="C"
+			cExec += "'"+xVal+"'"
+		ElseIF _CurrStru[nC][2]=="D"
+			cExec += "'"+dtos(xVal)+"'"
+		ElseIF _CurrStru[nC][2]=="N"
+			cExec += str(xVal,_CurrStru[nC][3],_CurrStru[nC][4])
+		ElseIF _CurrStru[nC][2]=="L"
+			cExec += "'"+IIF(xVal,'T','F')+"'"
+		Else
+			cExec += "NULL"
+		Endif
+	Next
+	
+	cExec += " WHERE R_E_C_N_O_ = "+str(randomize(1,lastrec()+2),10)
+	
+	xRet := TCSQlExec(cExec)
+
+ElseIf nOpc == 3
+
+	ShowOP('OP TCSqlExec (Insert) ')
+
+	cExec := "INSERT INTO RDDTEST ( "
+	For nC := 1 to _CurrMaxCpos
+		cExec += _CurrStru[nC][1]
+		cExec += ','
+	Next
+	
+	cExec += " R_E_C_N_O_, D_E_L_E_T_ , R_E_C_D_E_L_ )  VALUES ( "
+
+	For nC := 1 to _CurrMaxCpos
+		xVal 	:= xValue(_CurrStru[nC][2],_CurrStru[nC][3],_CurrStru[nC][4])
+		If _CurrStru[nC][2]=="C"
+			cExec += "'"+xVal+"'"
+		ElseIF _CurrStru[nC][2]=="D"
+			cExec += "'"+dtos(xVal)+"'"
+		ElseIF _CurrStru[nC][2]=="N"
+			cExec += str(xVal,_CurrStru[nC][3],_CurrStru[nC][4])
+		ElseIF _CurrStru[nC][2]=="L"
+			cExec += "'"+IIF(xVal,'T','F')+"'"
+		Else
+			cExec += "NULL"
+		Endif
+		cExec += ', '
+	Next
+
+	// R_E_C_N_O_ , D_E_L_E_T_ , R_E_C_D_E_L_ 
+	cExec += str(lastrec()+1,10)+",' ',0"
+	
+	cExec += ')'
+	
+	xret := TCSQlExec(cExec)
+
+Endif
+
+Return
+
+
+/*
+
+Verificar se TCInternal(10) ainda é utilizado
+
+User Function MyPK()
+tsttopinit()
+xRet := TcInternal(10,RDDTEST_TABLE)
+Return
+
+*/
+
+Static Function QryZuada(cQuery)
+Local nTamQuery , nCutQuery  , aInsChar  , nR 
+nTamQuery := len(cQuery)
+If nTamQuery > 0 
+	nCutQuery := randomize(1,nTamQuery+1)
+	aInsChar := {"KEYFLD(","(",")","{","--","//","/*","*/","'",'"',chr(randomize(0,256))}
+	nR := randomize(1,len(aInsChar)+1)
+	conout("Zoando Qry Ins ["+aInsChar[nR]+"] (ASC "+str(asc(left(aInsChar[nR],1)),3)+") AT ["+str(nCutQuery,4)+"]")
+	Return left(cQuery,nCutQuery) + aInsChar[nR] + substr(cQuery,nCutQuery+1)
+Endif
+aInsChar := {"KEYFLD(","(",")","{","--","//","/*","*/","'",'"',chr(randomize(0,256))}
+nR := randomize(1,len(aInsChar)+1)
+Return aInsChar[nR]
+
+/*
+DbUseArea(.T., 'TOPCONN', RDDTEST_TABLE, 'TMP', .T., .T.)
+DbSetFilter({|| CPON <> 88 } , " CPON <> 88 ")
+*/
+
+User Function ASFiltro()
+Local cfiltro := "@CPON <> 666"
+Local nLap := 0, nRecs := 0 
+
+TSTTopInit()
+
+USE RDDTEST_TABLE alias TRB SHARED NEW VIA "TOPCONN"
+
+if neterr()
+	UserException("Failed to open RDDTEST Shared")
+Endif
+
+set filter to &(cFiltro)
+
+dbgotop()
+
+conout("Start : "+Time())
+
+while !killapp()
+	
+	while !eof()
+		dbgoto(recno())
+		dbskip()
+		nRecs++
+	enddo
+	
+	While !bof()
+		dbgoto(recno())
+		dbskip(-1)
+		nRecs++
+	Enddo
+	
+	conout("LAP "+str(++nlap,4)+" - "+time()+" - "+str(nrecs,6))
+	if nRecs<1700
+		UserException("OPA, acabaram os resources !!!")
+	Endif
+	nrecs := 0 	
+enddo
+
+Return
+
+
+User function Zquery()
+Local cQuery := ""
+Local nLap := 0
+lOCAL nQPS := 0 
+Local nTimer := seconds()
+Local cLastTimer := time()
+tsttopinit()
+cQuery := "SELECT * FROM RDDTEST WHERE CPON <> 666 FOR READ ONLY"
+
+nTimer := seconds()
+While !killapp() .and. nlap<9999
+	DbUseArea(.T., 'TOPCONN', TcGenQry(,,cQuery), 'QRYTMP', .T., .T.)
+	USE
+	nQPS++
+	nlap++
+	IF cLastTimer <> TIME() 
+		conout("LAP "+str(nlap,6)+" - "+time()+" QPS = "+str(nQPS,4)+" MED="+str(nlap/(seconds()-nTimer),12,3) )
+		cLastTimer := time()
+		nQPS := 0 
+	eNDIF
+Enddo
+Conout( "Total = "+str(seconds()-nTimer,12,3) )
+Return
+
+
+User Function SyBQuery()
+Local nlap := 0 
+
+tsttopinit()
+
+cQuery := "SELECT SE2.*,SA2.A2_COD,SA2.A2_NOME,SA2.A2_NREDUZ FROM "
+cQuery += "SE2010 SE2 , SA2010 SA2 WHERE SE2.E2_FILIAL = '  ' AND "
+cQuery += "SA2.A2_FILIAL = '  ' AND SE2.E2_FORNECE = SA2.A2_COD "
+cQuery += "AND SE2.E2_LOJA = SA2.A2_LOJA AND SE2.E2_FORNECE "
+cQuery += "BETWEEN '          ' AND 'ZZZZZZZZ  ' AND "
+cQuery += "SE2.E2_LOJA BETWEEN '  ' AND 'ZZ' AND "
+cQuery += "SE2.E2_EMISSAO BETWEEN '20010101' AND '20071231' "
+cQuery += "AND SE2.E2_VENCREA BETWEEN '20070501' AND '20070531' "
+cQuery += "AND SE2.E2_TIPO NOT IN ('AB-','IR-','IN-','IS-','PI-','CF-','CS-','FU-','FE-') "
+cQuery += "AND SE2.E2_EMISSAO <= '20070724' AND SE2.D_E_L_E_T_ <> '*' AND SA2.D_E_L_E_T_ <> '*' "
+cQuery += "ORDER BY E2_FILIAL,E2_FORNECE,E2_LOJA,E2_PREFIXO,E2_NUM,E2_PARCELA,E2_TIPO"
+
+DbUseArea(.T., 'TOPCONN', TcGenQry(,,cQuery), 'QRYTMP', .T., .T.)
+
+nTimer := seconds()
+While !eof()
+	nlap++
+	dbskip()
+Enddo
+Conout( "Total = "+str(seconds()-nTimer,12,3) )
+conout( "Laps = "+str(nlap,6)  )
+
+Return
+
+
+User Function JRefresh(cTable)
+
+Tsttopinit()
+
+If empty(cTable)
+	cTable := RDDTEST_TABLE
+Endif
+
+While !killapp()
+	TCRefresh(cTable)
+Enddo
+
+Return
+
+User Function BateLock()
+
+tsttopinit()
+TOPTSTLOCK()
+
+Return
+
